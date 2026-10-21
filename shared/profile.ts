@@ -107,6 +107,20 @@ export type MenuItem = {
   name: string;
   grams: number;
   nutrients: Nutrients;
+  portionLabel: string;
+};
+export type PlannedMeal = {
+  name: string;
+  title: string;
+  preparation: string[];
+  items: MenuItem[];
+  totals: Nutrients;
+};
+export type MealPlanDay = {
+  day: string;
+  menu: PlannedMeal[];
+  totals: Nutrients;
+  closeToTargets: boolean;
 };
 export type DailyPlan = {
   eligible: boolean;
@@ -115,7 +129,8 @@ export type DailyPlan = {
   age: number;
   warnings: string[];
   notes: string[];
-  menu: { name: string; items: MenuItem[]; totals: Nutrients }[];
+  menu: PlannedMeal[];
+  week: MealPlanDay[];
   menuTotals: Nutrients;
   barrierTips: { barrier: string; tip: string }[];
 };

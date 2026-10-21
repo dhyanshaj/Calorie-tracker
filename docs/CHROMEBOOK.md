@@ -58,3 +58,23 @@ npm run dev
 If you see `No such file or directory`, check the folder name and location in
 **Linux files**. If you see `nvm` or `npm` not found, close and reopen Terminal,
 then check `node --version` again.
+
+## Update an existing installation without losing your diary
+
+Your Chromebook copy does not update automatically when code changes on GitHub.
+
+1. In the Terminal running the app, press **Ctrl+C** to stop it.
+2. Download a fresh ZIP from the repository's **main** branch using **Code → Download ZIP**.
+3. Open that ZIP in the **Files** app, then open the `Calorie-tracker-main` folder **inside** it.
+4. Select the contents of that inner folder with **Ctrl+A**, then **Ctrl+C**.
+5. Open **Linux files → your existing Calorie-tracker-main folder**, then paste with **Ctrl+V**. Replace matching source files and merge matching subfolders if prompted. Copy the contents into the existing folder; do not delete or replace the outer app folder.
+6. Keep the existing hidden **`.data`** folder (your account and meals) and **`.env`** file (your configuration). The GitHub ZIP does not contain either one.
+7. In Terminal, run:
+
+   ```bash
+   cd ~/Calorie-tracker-main
+   npm ci
+   npm run dev
+   ```
+
+8. Refresh `localhost:3000` in Chrome. Open **My nutrition plan** to see the daily meal planner.

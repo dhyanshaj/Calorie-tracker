@@ -39,7 +39,7 @@ import {
   X,
   Zap,
 } from "lucide-react";
-import { PlanView } from "./Account";
+import { PlanView } from "./PlanView";
 import type { Account, DailyPlan } from "../shared/profile";
 import { api } from "./api";
 import type {
@@ -797,6 +797,7 @@ export default function Tracker({
               plan={plan}
               onSettings={onSettings}
               onAddMeal={planMeal}
+              canLogMeals={foods.length > 0 && !locked}
             />
           ) : (
             <>

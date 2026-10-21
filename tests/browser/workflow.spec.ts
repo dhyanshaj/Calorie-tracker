@@ -28,27 +28,79 @@ test("account, onboarding, plan, photo fallback, corrections and diary lifecycle
   await expect(page.getByText("4–5 workouts per week")).toBeVisible();
   await page.getByRole("button", { name: "Continue", exact: true }).click();
   await page.getByLabel("Target weight").fill("75");
+  const profileResponse = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/api/profile") &&
+      response.request().method() === "PUT",
+  );
   await page.getByRole("button", { name: "Build my starting plan" }).click();
-  await expect(page.getByText("A sample day, made for you")).toBeVisible();
-  await expect(page.getByText("Actual sample menu totals")).toBeVisible();
-  if (testInfo.project.name === "desktop")
-    await page.screenshot({
-      path: "/tmp/platewise-plan-desktop.png",
-      fullPage: true,
-    });
-  await page.getByRole("button", { name: "Overview", exact: true }).click();
+  const responseBody = await (await profileResponse).json();
+  await expect(
+    page.getByRole("heading", { name: "Your daily meal plan", exact: true }),
+  ).toBeVisible();
+  await expect(page.getByRole("tab")).toHaveCount(7);
+  await page.getByRole("tab", { name: /^Mon/ }).click();
+  await expect(page.locator(".plan-meal")).toHaveCount(4);
+  await expect(page.locator(".plan-meal-header h3")).toHaveText(
+    responseBody.plan.week[0].menu.map((meal: any) => meal.title),
+  );
+  await expect(
+    page.locator(".day-nutrition-summary .comparison-kcal > strong"),
+  ).toHaveText(
+    `${Math.round(responseBody.plan.week[0].totals.kcal).toLocaleString()}kcal`,
+  );
+  await page.getByRole("tab", { name: /^Tue/ }).click();
+  await expect(page.locator(".day-plan-heading h4")).toHaveText(
+    "Tuesday’s menu",
+  );
+  await expect(page.locator(".plan-meal-header h3")).toHaveText(
+    responseBody.plan.week[1].menu.map((meal: any) => meal.title),
+  );
+  await page.locator(".meal-preparation summary").first().click();
+  await expect(page.locator(".meal-preparation ol").first()).toBeVisible();
+  await page.getByText("Ingredients for tuesday").click();
+  await expect(page.locator(".shopping-list ul")).toBeVisible();
+  const colors = await page
+    .locator(".plan-meal")
+    .first()
+    .evaluate((element) => ({
+      card: getComputedStyle(element).backgroundColor,
+      page: getComputedStyle(document.body).backgroundColor,
+    }));
+  expect(colors.card).toBe("rgb(27, 29, 35)");
+  expect(colors.page).toBe("rgb(16, 17, 21)");
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth > window.innerWidth,
+    ),
+  ).toBe(false);
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.screenshot({
+    path: `/tmp/platewise-plan-${testInfo.project.name}.png`,
+    fullPage: true,
+  });
+  await page
+    .getByRole("button", { name: "Review & log this meal" })
+    .first()
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "Your meal, estimated" }),
+  ).toBeVisible();
+  await expect(page.locator(".food-row")).toHaveCount(
+    responseBody.plan.week[1].menu[0].items.length,
+  );
+  await expect(page.locator(".daily-calories strong")).toHaveText("0");
+  await page.getByRole("button", { name: "Discard estimate" }).click();
   const photo = await sharp({
     create: { width: 160, height: 160, channels: 3, background: "#8eaa72" },
   })
     .png()
     .toBuffer();
-  await page
-    .getByLabel("Upload meal photo", { exact: true })
-    .setInputFiles({
-      name: "test-only-fixture.png",
-      mimeType: "image/png",
-      buffer: photo,
-    });
+  await page.getByLabel("Upload meal photo", { exact: true }).setInputFiles({
+    name: "test-only-fixture.png",
+    mimeType: "image/png",
+    buffer: photo,
+  });
   await expect(
     page.getByAltText("Your meal, ready for analysis"),
   ).toBeVisible();
@@ -120,4 +172,50 @@ test("account, onboarding, plan, photo fallback, corrections and diary lifecycle
   );
   expect(overflow).toBe(false);
   expect(errors).toEqual([]);
+});
+
+test("profiles without automated targets see a clear explanation rather than an empty plan", async ({
+  page,
+}) => {
+  const signup = await page.request.post("/api/auth/signup", {
+    data: {
+      name: "Plan review",
+      email: `guard-${Date.now()}@example.com`,
+      password: "test-account-password",
+    },
+  });
+  expect(signup.status()).toBe(201);
+  const profile = {
+    name: "Plan review",
+    birthDate: "1996-05-10",
+    country: "India",
+    gender: "unspecified",
+    energyBasis: "neutral",
+    heightCm: 170,
+    weightKg: 70,
+    goal: "maintain",
+    targetWeightKg: null,
+    timelineWeeks: 12,
+    barriers: [],
+    activity: "light",
+    diet: "vegetarian",
+    allergies: [],
+    needsClinicalGuidance: true,
+  };
+  const saved = await page.request.put("/api/profile", { data: profile });
+  expect(saved.status()).toBe(200);
+  await page.goto("/");
+  await page
+    .getByRole("button", { name: "My nutrition plan", exact: true })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "Why your meal plan isn’t shown" }),
+  ).toBeVisible();
+  await expect(page.locator(".plan-unavailable")).toContainText(
+    "automated targets and menus are paused",
+  );
+  await expect(
+    page.getByRole("button", { name: "Review profile details" }),
+  ).toBeVisible();
+  await expect(page.locator(".plan-meal")).toHaveCount(0);
 });

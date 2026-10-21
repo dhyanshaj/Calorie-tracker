@@ -1,6 +1,6 @@
 import type { DailyPlan, Profile } from "../shared/profile";
 import { activities } from "../shared/profile";
-import { foodById } from "../shared/catalog";
+import { buildWeekMenu } from "./menu";
 import { emptyNutrients, sumNutrients } from "../shared/nutrition";
 export function ageAt(birthDate: string, now = new Date()) {
   const d = new Date(`${birthDate}T12:00:00Z`);
@@ -42,6 +42,7 @@ export function buildPlan(profile: Profile, now = new Date()): DailyPlan {
     warnings,
     notes: [],
     menu: [],
+    week: [],
     menuTotals: emptyNutrients(),
     barrierTips,
   };
@@ -146,147 +147,18 @@ export function buildPlan(profile: Profile, now = new Date()): DailyPlan {
       "Source methods: Mifflin et al. (1990), general adult macronutrient ranges. Sample menu nutrition uses the same documented USDA food references as the tracker.",
     ],
   };
-  plan.menu = buildMenu(profile, targets);
+  plan.week = buildWeekMenu(profile, targets);
+  plan.menu = plan.week[0].menu;
   plan.menuTotals = sumNutrients(
     plan.menu.map((m) => ({ nutrients: m.totals })),
   );
-  if (
-    Math.abs(plan.menuTotals.protein - targets.protein) >
-      targets.protein * 0.15 ||
-    Math.abs(plan.menuTotals.kcal - targets.kcal) > targets.kcal * 0.1
-  )
+  if (plan.week.some((day) => !day.closeToTargets))
     warnings.push(
-      "The sample menu does not fully match your targets within the selected preferences. Review its actual totals and adjust foods with a dietitian.",
+      "Some days cannot fully match all three targets within the selected food preferences. Each day shows its actual totals and differences so you can review and adjust.",
     );
   if (profile.allergies.length)
     warnings.push(
       "The menu excludes listed allergen categories, but brands, sauces, and cross-contact still require label checks. Photos cannot confirm allergy safety.",
     );
   return plan;
-}
-const allergenMap: Record<string, string[]> = {
-  milk: ["Milk"],
-  yogurt: ["Milk"],
-  ghee: ["Milk"],
-  egg: ["Eggs"],
-  salmon: ["Fish"],
-  tofu: ["Soy"],
-  "peanut-butter": ["Peanuts"],
-  almonds: ["Tree nuts"],
-  roti: ["Wheat / gluten"],
-  bread: ["Wheat / gluten"],
-  oats: ["Wheat / gluten"],
-};
-function buildMenu(
-  profile: Profile,
-  targets: { kcal: number; protein: number; fat: number },
-) {
-  const allowed = (id: string) =>
-    !allergenMap[id]?.some((a) => profile.allergies.includes(a as any));
-  const vegan = profile.diet === "vegan";
-  const balanced = profile.diet === "balanced";
-  const candidates: [string, [string, number, number, number][]][] = [
-    [
-      "Breakfast",
-      [
-        [allowed("oats") ? "oats" : "rice", 234, 120, 400],
-        ["banana", 118, 80, 160],
-        ...(!vegan
-          ? [["milk", 200, 100, 300] as [string, number, number, number]]
-          : []),
-      ],
-    ],
-    [
-      "Lunch",
-      [
-        ["rice", 180, 100, 300],
-        [balanced ? "chicken" : "tofu", 150, 80, 250],
-        ["broccoli", 150, 100, 220],
-        ["oil", 8, 0, 18],
-      ],
-    ],
-    [
-      "Dinner",
-      [
-        [
-          allowed("roti") ? "roti" : "rice",
-          allowed("roti") ? 90 : 160,
-          50,
-          250,
-        ],
-        ["dal", 220, 150, 350],
-        ["spinach", 150, 80, 220],
-        ...(!vegan
-          ? [["yogurt", 150, 100, 250] as [string, number, number, number]]
-          : []),
-      ],
-    ],
-    [
-      "Snack",
-      [
-        ["apple", 182, 100, 220],
-        ["almonds", 25, 10, 40],
-        ["chickpeas", 100, 60, 220],
-      ],
-    ],
-  ];
-  // Coordinate descent finds practical portions near all three daily targets.
-  const entries = candidates.flatMap(([meal, foods]) =>
-    foods
-      .filter(([id]) => allowed(id))
-      .map(([id, grams, min, max]) => ({
-        meal,
-        id,
-        grams,
-        min,
-        max,
-        n: foodById.get(id)!.per100,
-      })),
-  );
-  const score = () => {
-    const n = entries.reduce(
-      (a, e) => ({
-        kcal: a.kcal + (e.n.kcal * e.grams) / 100,
-        protein: a.protein + (e.n.protein * e.grams) / 100,
-        fat: a.fat + (e.n.fat * e.grams) / 100,
-      }),
-      emptyNutrients(),
-    );
-    return (
-      ((n.kcal - targets.kcal) / targets.kcal) ** 2 * 3 +
-      ((n.protein - targets.protein) / targets.protein) ** 2 +
-      ((n.fat - targets.fat) / targets.fat) ** 2
-    );
-  };
-  for (const step of [20, 10, 5, 1])
-    for (let iter = 0; iter < 20; iter++)
-      for (const e of entries) {
-        const original = e.grams;
-        let best = score(),
-          chosen = original;
-        for (const d of [-step, step]) {
-          e.grams = Math.max(e.min, Math.min(e.max, original + d));
-          const s = score();
-          if (s < best) {
-            best = s;
-            chosen = e.grams;
-          }
-        }
-        e.grams = chosen;
-      }
-  return candidates.map(([name]) => {
-    const items = entries
-      .filter((e) => e.meal === name && e.grams > 0)
-      .map((e) => ({
-        foodId: e.id,
-        name: foodById.get(e.id)!.name,
-        grams: e.grams,
-        nutrients: {
-          kcal: (e.n.kcal * e.grams) / 100,
-          protein: (e.n.protein * e.grams) / 100,
-          fat: (e.n.fat * e.grams) / 100,
-        },
-      }));
-    return { name, items, totals: sumNutrients(items) };
-  });
 }

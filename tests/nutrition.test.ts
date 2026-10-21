@@ -235,7 +235,9 @@ test("allergens and vegan preferences filter the actual sample menu", () => {
     },
     new Date("2026-10-21"),
   );
-  const ids = p.menu.flatMap((m) => m.items.map((i) => i.foodId));
+  const ids = p.week.flatMap((day) =>
+    day.menu.flatMap((m) => m.items.map((i) => i.foodId)),
+  );
   for (const excluded of [
     "chicken",
     "milk",
@@ -244,9 +246,116 @@ test("allergens and vegan preferences filter the actual sample menu", () => {
     "almonds",
     "roti",
     "oats",
+    "salmon",
+    "egg",
+    "bread",
   ])
     assert.ok(!ids.includes(excluded));
   assert.ok(p.warnings.some((w) => w.includes("cross-contact")));
+});
+test("all seven days contain distinct meals, edible portions, preparation steps and accurate totals", () => {
+  const plan = buildPlan(profile, new Date("2026-10-21"));
+  assert.equal(plan.week.length, 7);
+  assert.equal(new Set(plan.week.map((day) => day.day)).size, 7);
+  assert.ok(
+    new Set(
+      plan.week.map((day) =>
+        JSON.stringify(
+          day.menu.map((meal) => meal.items.map((item) => item.foodId)),
+        ),
+      ),
+    ).size >= 5,
+  );
+  for (const day of plan.week) {
+    assert.deepEqual(
+      day.menu.map((meal) => meal.name),
+      ["Breakfast", "Lunch", "Dinner", "Snack"],
+    );
+    const expected = sumNutrients(day.menu.flatMap((meal) => meal.items));
+    for (const nutrient of ["kcal", "protein", "fat"] as const)
+      assert.ok(Math.abs(day.totals[nutrient] - expected[nutrient]) < 1e-7);
+    for (const meal of day.menu) {
+      assert.ok(
+        meal.title.length > 3 &&
+          meal.preparation.length > 0 &&
+          meal.items.length > 0,
+      );
+      assert.equal(
+        new Set(meal.items.map((item) => item.foodId)).size,
+        meal.items.length,
+      );
+      for (const item of meal.items) {
+        const food = foodById.get(item.foodId)!;
+        assert.ok(
+          item.grams > 0 && item.grams <= 450 && item.portionLabel.length > 0,
+        );
+        const wholePortions: Record<string, number> = {
+          egg: 50,
+          bread: 32,
+          roti: 45,
+        };
+        if (wholePortions[item.foodId])
+          assert.equal(item.grams % wholePortions[item.foodId], 0);
+        for (const nutrient of ["kcal", "protein", "fat"] as const)
+          assert.ok(
+            Math.abs(
+              item.nutrients[nutrient] -
+                (food.per100[nutrient] * item.grams) / 100,
+            ) < 1e-7,
+          );
+      }
+    }
+    assert.ok(
+      Math.abs(day.totals.kcal - plan.targets!.kcal) < plan.targets!.kcal * 0.1,
+    );
+  }
+});
+test("weekly meals substitute all listed allergens and retain vegetarian preferences", () => {
+  const restricted = buildPlan({
+    ...profile,
+    diet: "vegan",
+    allergies: [
+      "Milk",
+      "Eggs",
+      "Fish",
+      "Soy",
+      "Peanuts",
+      "Tree nuts",
+      "Wheat / gluten",
+    ],
+  });
+  const excluded = new Set([
+    "milk",
+    "yogurt",
+    "ghee",
+    "egg",
+    "salmon",
+    "chicken",
+    "chicken-curry",
+    "tofu",
+    "peanut-butter",
+    "almonds",
+    "bread",
+    "roti",
+    "oats",
+  ]);
+  for (const day of restricted.week)
+    for (const meal of day.menu)
+      for (const item of meal.items) assert.ok(!excluded.has(item.foodId));
+  const vegetarian = buildPlan({ ...profile, diet: "vegetarian" });
+  for (const day of vegetarian.week)
+    for (const meal of day.menu)
+      for (const item of meal.items)
+        assert.ok(
+          !["chicken", "chicken-curry", "salmon"].includes(item.foodId),
+        );
+  assert.ok(
+    restricted.warnings.some((warning) => warning.includes("actual totals")),
+  );
+  assert.equal(
+    buildPlan({ ...profile, needsClinicalGuidance: true }).week.length,
+    0,
+  );
 });
 test("age, clinical flags, underweight goals and aggressive timelines receive guarded outcomes", () => {
   assert.equal(

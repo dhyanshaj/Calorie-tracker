@@ -1,9 +1,11 @@
 # Platewise
 
-A working calorie tracker with a warm dark interface, meal-photo input,
+A working calorie tracker with a charcoal-and-gray interface, amber and violet accents, meal-photo input,
 editable nutrition estimates, personal accounts, and a persistent daily diary.
 A guided profile builds an adjustable nutrition starting point and a calculated
-sample daily menu from goals, barriers, preferences, and weekly activity.
+seven-day meal plan from goals, barriers, preferences, and weekly activity.
+
+[Preview the meal-plan screen](docs/screenshots/meal-plan.png). The screenshot uses an automated test account; it is not your personal nutrition plan.
 
 ## Run locally
 
@@ -46,7 +48,7 @@ fixtures do not represent live image recognition.
 - Guided goals, past barriers, DOB, country, gender, calculation basis, height
   in cm, weight in kg, timeline, target weight, weekly exercise, food
   preferences, and allergy-category exclusions. Profile editing persists.
-- A documented starting calorie/protein/fat plan and a sample daily menu whose
+- A documented starting calorie/protein/fat plan and a seven-day menu whose
   quantities and actual nutrition are calculated, not demo values.
 - Description parsing for the bundled foods, numerical/word counts, grams,
   household portions, and explicit oil exclusions. Unsupported foods produce
@@ -116,9 +118,8 @@ identity is stored separately from the optional physiological calculation
 basis. The midpoint is explicitly labeled as less specific. Protein starts at
 1.2–1.6 g/kg depending on goal (capped at 30% of energy), fat at 30% of energy.
 Timeline/target-weight adjustments are bounded; aggressive requests are flagged,
-not promised. Menu portions are optimized against all three targets with food
-portion bounds, and actual menu totals remain visible when targets cannot be
-matched. Country is recorded for context, not used as a biological multiplier.
+not promised. Each of seven days has breakfast, lunch, dinner, and a snack. Menu portions are optimized against all three targets with food
+portion bounds, whole eggs/slices/rotis, and practical gram increments. Each day shows actual totals against targets when they cannot be matched exactly. Preparation notes and an ingredient checklist are included. Reviewing a planned meal opens an editable estimate and never automatically saves it. Country is recorded for context, not used as a biological multiplier.
 Barrier choices produce practical suggestions.
 
 Automated plans are for adults aged 18–80 and are educational starting points,
