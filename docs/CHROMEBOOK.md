@@ -41,7 +41,8 @@ running on your Chromebook; it is not a page inside GitHub.
 
 Description-based estimates, manual foods, nutrition plans, and your saved
 diary work without an API key. Photo recognition needs a server-side
-`MEAL_VISION_API_KEY`; see the main README for optional integration setup.
+`MEAL_VISION_API_KEY`; follow the [photo-recognition setup guide](PHOTO-SETUP.md)
+to create your key and save it securely on your Chromebook.
 
 ## Next time
 
@@ -77,4 +78,10 @@ Your Chromebook copy does not update automatically when code changes on GitHub.
    npm run dev
    ```
 
-8. Refresh `localhost:3000` in Chrome. Open **My nutrition plan** to see the daily meal planner.
+8. Refresh `localhost:3000` in Chrome. Open **My nutrition plan** to see the 30-day meal planner. Press **Start my free plan** when you are ready to begin the 30-calendar-day free period and save checklist progress.
+
+Photo recognition is optional and has separate provider billing; see
+[photo setup](PHOTO-SETUP.md). Accepting the ₹999 one-time lifetime payment
+also needs merchant configuration and a hosted server; see
+[payment setup](PAYMENTS.md). You do not need either integration to try local
+description estimates, meal planning, and the diary.

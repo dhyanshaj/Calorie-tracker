@@ -12,6 +12,11 @@ const app = createApp(store, {
   visionKey: process.env.MEAL_VISION_API_KEY,
   visionModel: process.env.MEAL_VISION_MODEL ?? "gpt-4.1-mini",
   usdaKey: process.env.USDA_API_KEY,
+  payments: {
+    keyId: process.env.RAZORPAY_KEY_ID,
+    keySecret: process.env.RAZORPAY_KEY_SECRET,
+    webhookSecret: process.env.RAZORPAY_WEBHOOK_SECRET,
+  },
 });
 const port = Number(process.env.PORT ?? 3000);
 if (process.env.NODE_ENV === "production") {
@@ -30,7 +35,9 @@ if (process.env.NODE_ENV === "production") {
 }
 const server = app.listen(port, "0.0.0.0", (error?: Error) => {
   if (error) {
-    console.error(`Could not start Platewise on port ${port}: ${error.message}`);
+    console.error(
+      `Could not start Platewise on port ${port}: ${error.message}`,
+    );
     store.close();
     process.exit(1);
   }

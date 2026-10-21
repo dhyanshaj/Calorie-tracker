@@ -9,6 +9,7 @@ import {
   Flame,
   Leaf,
   Moon,
+  LoaderCircle,
   ShoppingBasket,
   Sun,
   Sunrise,
@@ -16,6 +17,8 @@ import {
 } from "lucide-react";
 import type { Account, DailyPlan, PlannedMeal } from "../shared/profile";
 import { activities, goals } from "../shared/profile";
+import { usePlanProgram } from "./usePlanProgram";
+import { PlanProgress } from "./PlanProgress";
 import type { Nutrients } from "../shared/types";
 const format = (value: number, digits = 0) =>
   new Intl.NumberFormat(undefined, { maximumFractionDigits: digits }).format(
@@ -35,9 +38,9 @@ export function PlanView({
   canLogMeals: boolean;
   onAddMeal: (items: PlannedMeal["items"], title: string) => void;
 }) {
-  const [selectedDay, setSelectedDay] = useState(
-    () => (new Date().getDay() + 6) % 7,
-  );
+  const [selectedDay, setSelectedDay] = useState(0);
+  const progress = usePlanProgram();
+  plan = plan?.eligible ? (progress.state?.program?.plan ?? plan) : plan;
   if (!plan)
     return (
       <section className="card plan-empty">
@@ -51,11 +54,12 @@ export function PlanView({
         </button>
       </section>
     );
-  const activeDay = plan.week?.[selectedDay] ?? {
+  const activeDay = plan.days?.[selectedDay] ?? {
     day: "Every day",
     menu: plan.menu,
     totals: plan.menuTotals,
     closeToTargets: false,
+    targets: plan.targets!,
   };
   const shopping = new Map<string, { name: string; grams: number }>();
   for (const meal of activeDay.menu)
@@ -72,7 +76,7 @@ export function PlanView({
         <div>
           <span className="eyebrow">MADE FROM YOUR GOALS & PREFERENCES</span>
           <h2>
-            Your week, planned.
+            Your next 30 days, planned.
             <br />
             <em>One good meal at a time.</em>
           </h2>
@@ -123,6 +127,22 @@ export function PlanView({
         </>
       )}
       {plan.eligible && (
+        <PlanProgress
+          user={user}
+          state={progress.state}
+          loading={progress.loading}
+          busy={progress.busy}
+          error={progress.error}
+          onStart={() => void progress.start()}
+          onNext={() => {
+            void progress.next();
+            setSelectedDay(0);
+          }}
+          onRetry={() => void progress.refresh()}
+          onState={progress.setState}
+        />
+      )}
+      {plan.eligible && (
         <section className="weekly-plan" aria-labelledby="meal-plan-title">
           <div className="plan-menu-heading">
             <div>
@@ -131,49 +151,99 @@ export function PlanView({
               </span>
               <h3 id="meal-plan-title">Your daily meal plan</h3>
               <p>
-                Seven days of breakfast, lunch, dinner, and snacks, portioned
+                Thirty days of breakfast, lunch, dinner, and snacks, portioned
                 around your estimated daily needs.
               </p>
             </div>
             <span className="weekly-badge">
               <CalendarDays size={15} />
-              7-day plan
+              30-day plan
             </span>
           </div>
-          <div className="plan-days" role="tablist" aria-label="Meal plan day">
-            {plan.week.map((day, index) => (
-              <button
-                key={day.day}
-                id={`plan-tab-${index}`}
-                role="tab"
-                aria-selected={index === selectedDay}
-                aria-controls="selected-meal-plan"
-                tabIndex={index === selectedDay ? 0 : -1}
-                className={index === selectedDay ? "active" : ""}
-                onClick={() => setSelectedDay(index)}
-                onKeyDown={(event) => {
-                  let next: number | undefined;
-                  if (event.key === "ArrowRight") next = (index + 1) % 7;
-                  if (event.key === "ArrowLeft") next = (index + 6) % 7;
-                  if (event.key === "Home") next = 0;
-                  if (event.key === "End") next = 6;
-                  if (next !== undefined) {
-                    event.preventDefault();
-                    setSelectedDay(next);
-                    (
-                      event.currentTarget.parentElement?.children[
-                        next
-                      ] as HTMLButtonElement
-                    )?.focus();
-                  }
-                }}
-              >
-                <span>{day.day.slice(0, 3)}</span>
-                <small>{format(day.totals.kcal)} kcal</small>
-                {index === selectedDay && <span className="day-active-dot" />}
-              </button>
-            ))}
+          <p className="checklist-instructions">
+            Choose a day to view its meals. Tick the separate checkbox when you
+            followed that day’s plan.
+            {!progress.state?.program
+              ? " Start your free plan above to save ticks."
+              : ""}
+          </p>
+          <div className="month-days" role="tablist" aria-label="Meal plan day">
+            {plan.days.map((day, index) => {
+              const completed =
+                progress.pendingDay?.day === index + 1
+                  ? progress.pendingDay.completed
+                  : (progress.state?.program?.completedDays.includes(
+                      index + 1,
+                    ) ?? false);
+              return (
+                <div
+                  className={`month-day ${index === selectedDay ? "selected" : ""} ${completed ? "completed" : ""}`}
+                  key={day.day}
+                >
+                  <button
+                    id={`plan-tab-${index}`}
+                    role="tab"
+                    aria-selected={index === selectedDay}
+                    aria-controls="selected-meal-plan"
+                    tabIndex={index === selectedDay ? 0 : -1}
+                    onClick={() => setSelectedDay(index)}
+                    onKeyDown={(event) => {
+                      let next: number | undefined;
+                      if (event.key === "ArrowRight") next = (index + 1) % 30;
+                      if (event.key === "ArrowLeft") next = (index + 29) % 30;
+                      if (event.key === "Home") next = 0;
+                      if (event.key === "End") next = 29;
+                      if (next !== undefined) {
+                        event.preventDefault();
+                        setSelectedDay(next);
+                        (
+                          event.currentTarget
+                            .closest(".month-days")
+                            ?.querySelectorAll("[role=tab]")[
+                            next
+                          ] as HTMLButtonElement
+                        )?.focus();
+                      }
+                    }}
+                  >
+                    <span>{day.day}</span>
+                    <small>{format(day.totals.kcal)} kcal</small>
+                  </button>
+                  <label
+                    className="day-check"
+                    title={
+                      completed
+                        ? `Undo completion for ${day.day}`
+                        : `Mark ${day.day} complete`
+                    }
+                  >
+                    <input
+                      aria-label={`Completed ${day.day}`}
+                      type="checkbox"
+                      aria-busy={progress.pendingDay?.day === index + 1}
+                      checked={completed}
+                      disabled={
+                        !progress.state?.program ||
+                        !progress.state.access.canTrack ||
+                        progress.busy ||
+                        progress.loading
+                      }
+                      onChange={(event) =>
+                        void progress.complete(index + 1, event.target.checked)
+                      }
+                    />
+                    <span>{completed ? <CheckCircle2 size={14} /> : null}</span>
+                  </label>
+                </div>
+              );
+            })}
           </div>
+          {progress.state?.access.status === "expired" && (
+            <p className="plan-expired-note">
+              Your past plan is read-only. Lifetime access enables continued
+              checklists and new plans.
+            </p>
+          )}
           <div
             id="selected-meal-plan"
             role="tabpanel"
@@ -273,7 +343,7 @@ export function PlanView({
               <div className="target-comparisons">
                 {(["kcal", "protein", "fat"] as const).map((key, index) => {
                   const actual = activeDay.totals[key],
-                    target = plan.targets![key],
+                    target = activeDay.targets[key],
                     difference = actual - target;
                   return (
                     <div

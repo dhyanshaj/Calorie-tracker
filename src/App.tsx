@@ -1849,6 +1849,45 @@ export default function Tracker({
                   signed-in account. Server administrators can access the
                   database; secure the deployment and backups.
                 </p>
+                <h3>Enable photo recognition · owner setup</h3>
+                <ol className="photo-setup-steps">
+                  <li>
+                    Open{" "}
+                    <a
+                      href="https://platform.openai.com/api-keys"
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      OpenAI API keys ↗
+                    </a>{" "}
+                    and create a private key.
+                  </li>
+                  <li>
+                    Enable{" "}
+                    <a
+                      href="https://platform.openai.com/settings/organization/billing/overview"
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      API billing ↗
+                    </a>
+                    . A ChatGPT subscription does not include API usage.
+                  </li>
+                  <li>
+                    Add the key to the server’s untracked .env file as
+                    MEAL_VISION_API_KEY, then restart the app. Never paste a key
+                    into chat or GitHub.
+                  </li>
+                </ol>
+                <p>
+                  <a
+                    href="https://github.com/dhyanshaj/Calorie-tracker/blob/main/docs/PHOTO-SETUP.md"
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Step-by-step Chromebook photo setup ↗
+                  </a>
+                </p>
                 <h3>What works here</h3>
                 <p>
                   {status?.visionAvailable

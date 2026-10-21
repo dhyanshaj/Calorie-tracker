@@ -3,7 +3,7 @@
 A working calorie tracker with a charcoal-and-gray interface, amber and violet accents, meal-photo input,
 editable nutrition estimates, personal accounts, and a persistent daily diary.
 A guided profile builds an adjustable nutrition starting point and a calculated
-seven-day meal plan from goals, barriers, preferences, and weekly activity.
+30-day meal plan from goals, barriers, preferences, and weekly activity.
 
 [Preview the meal-plan screen](docs/screenshots/meal-plan.png). The screenshot uses an automated test account; it is not your personal nutrition plan.
 
@@ -48,7 +48,7 @@ fixtures do not represent live image recognition.
 - Guided goals, past barriers, DOB, country, gender, calculation basis, height
   in cm, weight in kg, timeline, target weight, weekly exercise, food
   preferences, and allergy-category exclusions. Profile editing persists.
-- A documented starting calorie/protein/fat plan and a seven-day menu whose
+- A documented starting calorie/protein/fat plan and a 30-day menu whose
   quantities and actual nutrition are calculated, not demo values.
 - Description parsing for the bundled foods, numerical/word counts, grams,
   household portions, and explicit oil exclusions. Unsupported foods produce
@@ -59,6 +59,20 @@ fixtures do not represent live image recognition.
 - JPEG/PNG/WebP upload, drag/drop, camera capture where supported, and preview.
   Real photo recognition requires the service below. No key means an explicit
   error with a description-only alternative, never fabricated photo analysis.
+
+## 30 days free, then ₹999 once
+
+The plan page contains 30 daily menus and a persistent, account-specific checklist.
+Start the free plan explicitly to begin its 30-calendar-day period. Tick or untick
+days you followed; the remaining count updates and survives refresh/sign-in.
+Checklist ticks never create diary entries or change nutrition totals. Completed
+meal snapshots are preserved when profile changes refresh pending days.
+
+After the free period, the old plan is read-only. Lifetime meal planning costs
+**₹999 once**, with no automatic renewal. Razorpay checkout is implemented but
+stays disabled until merchant keys and signed webhooks are configured. Entitlement
+requires a server-verified captured INR 999 payment; a browser success callback
+cannot unlock it. The diary remains accessible. See [payment setup](docs/PAYMENTS.md).
 
 ## Optional integrations
 
@@ -91,6 +105,8 @@ energy, protein, and fat. Results show their FDC source. Nutrients and sources
 are snapshotted with a saved meal so the diary survives later service outages.
 New USDA searches or unsaved remote foods still require working USDA access.
 
+For step-by-step Chromebook instructions, see [photo-recognition setup](docs/PHOTO-SETUP.md).
+
 Obtain service keys through [OpenAI](https://platform.openai.com/) and
 [USDA FoodData Central](https://fdc.nal.usda.gov/api-key-signup). Provider billing
 and quotas apply. Live recognition and live USDA search need valid keys and
@@ -118,7 +134,7 @@ identity is stored separately from the optional physiological calculation
 basis. The midpoint is explicitly labeled as less specific. Protein starts at
 1.2–1.6 g/kg depending on goal (capped at 30% of energy), fat at 30% of energy.
 Timeline/target-weight adjustments are bounded; aggressive requests are flagged,
-not promised. Each of seven days has breakfast, lunch, dinner, and a snack. Menu portions are optimized against all three targets with food
+not promised. Each of 30 days has breakfast, lunch, dinner, and a snack. Menu portions are optimized against all three targets with food
 portion bounds, whole eggs/slices/rotis, and practical gram increments. Each day shows actual totals against targets when they cannot be matched exactly. Preparation notes and an ingredient checklist are included. Reviewing a planned meal opens an editable estimate and never automatically saves it. Country is recorded for context, not used as a biological multiplier.
 Barrier choices produce practical suggestions.
 

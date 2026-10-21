@@ -235,7 +235,7 @@ test("allergens and vegan preferences filter the actual sample menu", () => {
     },
     new Date("2026-10-21"),
   );
-  const ids = p.week.flatMap((day) =>
+  const ids = p.days.flatMap((day) =>
     day.menu.flatMap((m) => m.items.map((i) => i.foodId)),
   );
   for (const excluded of [
@@ -253,20 +253,20 @@ test("allergens and vegan preferences filter the actual sample menu", () => {
     assert.ok(!ids.includes(excluded));
   assert.ok(p.warnings.some((w) => w.includes("cross-contact")));
 });
-test("all seven days contain distinct meals, edible portions, preparation steps and accurate totals", () => {
+test("all thirty days contain distinct meals, edible portions, preparation steps and accurate totals", () => {
   const plan = buildPlan(profile, new Date("2026-10-21"));
-  assert.equal(plan.week.length, 7);
-  assert.equal(new Set(plan.week.map((day) => day.day)).size, 7);
+  assert.equal(plan.days.length, 30);
+  assert.equal(new Set(plan.days.map((day) => day.day)).size, 30);
   assert.ok(
     new Set(
-      plan.week.map((day) =>
+      plan.days.map((day) =>
         JSON.stringify(
           day.menu.map((meal) => meal.items.map((item) => item.foodId)),
         ),
       ),
-    ).size >= 5,
+    ).size === 30,
   );
-  for (const day of plan.week) {
+  for (const day of plan.days) {
     assert.deepEqual(
       day.menu.map((meal) => meal.name),
       ["Breakfast", "Lunch", "Dinner", "Snack"],
@@ -339,11 +339,11 @@ test("weekly meals substitute all listed allergens and retain vegetarian prefere
     "roti",
     "oats",
   ]);
-  for (const day of restricted.week)
+  for (const day of restricted.days)
     for (const meal of day.menu)
       for (const item of meal.items) assert.ok(!excluded.has(item.foodId));
   const vegetarian = buildPlan({ ...profile, diet: "vegetarian" });
-  for (const day of vegetarian.week)
+  for (const day of vegetarian.days)
     for (const meal of day.menu)
       for (const item of meal.items)
         assert.ok(

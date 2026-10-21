@@ -1,6 +1,6 @@
 import type { DailyPlan, Profile } from "../shared/profile";
 import { activities } from "../shared/profile";
-import { buildWeekMenu } from "./menu";
+import { buildMonthMenu } from "./menu";
 import { emptyNutrients, sumNutrients } from "../shared/nutrition";
 export function ageAt(birthDate: string, now = new Date()) {
   const d = new Date(`${birthDate}T12:00:00Z`);
@@ -43,6 +43,7 @@ export function buildPlan(profile: Profile, now = new Date()): DailyPlan {
     notes: [],
     menu: [],
     week: [],
+    days: [],
     menuTotals: emptyNutrients(),
     barrierTips,
   };
@@ -147,12 +148,13 @@ export function buildPlan(profile: Profile, now = new Date()): DailyPlan {
       "Source methods: Mifflin et al. (1990), general adult macronutrient ranges. Sample menu nutrition uses the same documented USDA food references as the tracker.",
     ],
   };
-  plan.week = buildWeekMenu(profile, targets);
+  plan.days = buildMonthMenu(profile, targets);
+  plan.week = plan.days.slice(0, 7);
   plan.menu = plan.week[0].menu;
   plan.menuTotals = sumNutrients(
     plan.menu.map((m) => ({ nutrients: m.totals })),
   );
-  if (plan.week.some((day) => !day.closeToTargets))
+  if (plan.days.some((day) => !day.closeToTargets))
     warnings.push(
       "Some days cannot fully match all three targets within the selected food preferences. Each day shows its actual totals and differences so you can review and adjust.",
     );

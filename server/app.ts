@@ -3,6 +3,8 @@ import multer from "multer";
 import sharp from "sharp";
 import { rateLimit } from "express-rate-limit";
 import { z } from "zod";
+import { PlanPrograms } from "./programs";
+import { Billing, verificationSchema, type PaymentConfig } from "./billing";
 import { Accounts } from "./auth";
 import { profileSchema } from "../shared/profile";
 import { ageAt, buildPlan } from "./plan";
@@ -17,6 +19,9 @@ export type Config = {
   visionKey?: string;
   visionModel: string;
   usdaKey?: string;
+  payments?: PaymentConfig;
+  paymentFetch?: typeof fetch;
+  clock?: () => Date;
 };
 const itemSchema = z.object({
   id: z.string().min(1).max(100),
@@ -48,6 +53,13 @@ const saveSchema = z.object({
 export function createApp(store: MealStore, config: Config) {
   const app = express();
   const accounts = new Accounts(store.db);
+  const programs = new PlanPrograms(store.db, config.clock);
+  const billing = new Billing(
+    store.db,
+    programs,
+    config.payments ?? {},
+    config.paymentFetch,
+  );
   app.disable("x-powered-by");
   app.use((req, res, next) => {
     res.setHeader("X-Content-Type-Options", "nosniff");
@@ -61,18 +73,30 @@ export function createApp(store: MealStore, config: Config) {
         (!/^https?:\/\//.test(origin) ||
           new URL(origin).host !== req.get("host"))
       )
-        return res
-          .status(403)
-          .json({
-            error: {
-              code: "ORIGIN_REJECTED",
-              message:
-                "This request came from a different site. Open the app directly and try again.",
-            },
-          });
+        return res.status(403).json({
+          error: {
+            code: "ORIGIN_REJECTED",
+            message:
+              "This request came from a different site. Open the app directly and try again.",
+          },
+        });
     }
     next();
   });
+  app.post(
+    "/api/billing/webhook",
+    express.raw({ type: "application/json", limit: "128kb" }),
+    async (req, res) => {
+      if (!Buffer.isBuffer(req.body))
+        throw new AppError(
+          400,
+          "INVALID_WEBHOOK",
+          "A raw JSON body is required.",
+        );
+      await billing.webhook(req.body, req.get("x-razorpay-signature") ?? "");
+      res.json({ received: true });
+    },
+  );
   app.use(express.json({ limit: "128kb", type: "application/json" }));
   const upload = multer({
     storage: multer.memoryStorage(),
@@ -95,9 +119,19 @@ export function createApp(store: MealStore, config: Config) {
     },
   });
 
+  function visiblePlan(user: ReturnType<Accounts["get"]>) {
+    if (!user?.profile) return null;
+    const fresh = buildPlan(user.profile);
+    if (!fresh.eligible) return fresh;
+    const access = programs.access(user.id);
+    if (access.status === "expired")
+      return programs.current(user.id)?.plan ?? fresh;
+    if (access.hasLifetime) programs.refreshProfile(user.id, fresh);
+    return fresh;
+  }
   app.get("/api/auth/me", (req, res) => {
     const user = accounts.current(req);
-    res.json({ user, plan: user?.profile ? buildPlan(user.profile) : null });
+    res.json({ user, plan: visiblePlan(user) });
   });
   const authLimit = rateLimit({
     windowMs: 15 * 60_000,
@@ -105,14 +139,12 @@ export function createApp(store: MealStore, config: Config) {
     standardHeaders: "draft-8",
     legacyHeaders: false,
     handler: (_req, res) =>
-      res
-        .status(429)
-        .json({
-          error: {
-            code: "AUTH_LIMIT",
-            message: "Too many sign-in attempts. Please wait 15 minutes.",
-          },
-        }),
+      res.status(429).json({
+        error: {
+          code: "AUTH_LIMIT",
+          message: "Too many sign-in attempts. Please wait 15 minutes.",
+        },
+      }),
   });
   app.post("/api/auth/signup", authLimit, async (req, res) => {
     const user = await accounts.signup(req.body);
@@ -122,7 +154,7 @@ export function createApp(store: MealStore, config: Config) {
   app.post("/api/auth/login", authLimit, async (req, res) => {
     const user = await accounts.login(req.body);
     accounts.createSession(user.id, res);
-    res.json({ user, plan: user.profile ? buildPlan(user.profile) : null });
+    res.json({ user, plan: visiblePlan(user) });
   });
   app.post("/api/auth/logout", (req, res) => {
     accounts.logout(req, res);
@@ -135,7 +167,84 @@ export function createApp(store: MealStore, config: Config) {
     if (age < 0 || age > 110)
       throw new AppError(400, "INVALID_AGE", "Enter a valid date of birth.");
     const user = accounts.saveProfile(res.locals.user.id, profile);
-    res.json({ user, plan: buildPlan(profile) });
+    const plan = buildPlan(profile);
+    if (programs.access(user.id).status !== "expired")
+      programs.refreshProfile(user.id, plan);
+    res.json({ user, plan: visiblePlan(user) });
+  });
+  const programState = (userId: string) => ({
+    ...programs.state(userId, billing.configured),
+    paymentMode: billing.mode,
+  });
+  app.get("/api/plan-program", (_req, res) =>
+    res.json(programState(res.locals.user.id)),
+  );
+  app.post("/api/plan-program/start", (_req, res) => {
+    const user = res.locals.user;
+    if (!user.profile)
+      throw new AppError(
+        400,
+        "PROFILE_REQUIRED",
+        "Complete your profile first.",
+      );
+    programs.start(user.id, buildPlan(user.profile));
+    res.json(programState(user.id));
+  });
+  app.put("/api/plan-program/:id/days/:day", (req, res) => {
+    const id = z.uuid().parse(req.params.id);
+    const day = z.coerce.number().int().min(1).max(30).parse(req.params.day);
+    const { completed } = z.object({ completed: z.boolean() }).parse(req.body);
+    const user = res.locals.user;
+    programs.complete(
+      user.id,
+      id,
+      day,
+      completed,
+      !!user.profile && buildPlan(user.profile).eligible,
+    );
+    res.json(programState(user.id));
+  });
+  app.post("/api/plan-program/next", (_req, res) => {
+    const user = res.locals.user;
+    if (!user.profile)
+      throw new AppError(
+        400,
+        "PROFILE_REQUIRED",
+        "Complete your profile first.",
+      );
+    programs.next(user.id, buildPlan(user.profile));
+    res.json(programState(user.id));
+  });
+  const paymentLimit = rateLimit({
+    windowMs: 60_000,
+    limit: 15,
+    standardHeaders: "draft-8",
+    legacyHeaders: false,
+    handler: (_req, res) =>
+      res
+        .status(429)
+        .json({
+          error: {
+            code: "PAYMENT_RATE_LIMIT",
+            message: "Please wait a minute before checking payment again.",
+          },
+        }),
+  });
+  app.post("/api/billing/orders", paymentLimit, async (_req, res) =>
+    res.json(await billing.createOrder(res.locals.user.id)),
+  );
+  app.post("/api/billing/verify", paymentLimit, async (req, res) => {
+    await billing.verify(
+      res.locals.user.id,
+      verificationSchema.parse(req.body),
+    );
+    visiblePlan(res.locals.user);
+    res.json(programState(res.locals.user.id));
+  });
+  app.post("/api/billing/status", paymentLimit, async (_req, res) => {
+    await billing.status(res.locals.user.id);
+    visiblePlan(res.locals.user);
+    res.json(programState(res.locals.user.id));
   });
   app.get("/api/status", (_req, res) =>
     res.json({
@@ -159,14 +268,12 @@ export function createApp(store: MealStore, config: Config) {
     standardHeaders: "draft-8",
     legacyHeaders: false,
     handler: (_req, res) =>
-      res
-        .status(429)
-        .json({
-          error: {
-            code: "RATE_LIMIT",
-            message: "Please wait a minute before analyzing another meal.",
-          },
-        }),
+      res.status(429).json({
+        error: {
+          code: "RATE_LIMIT",
+          message: "Please wait a minute before analyzing another meal.",
+        },
+      }),
   });
   app.post(
     "/api/analyze",
@@ -336,11 +443,9 @@ export function createApp(store: MealStore, config: Config) {
     res.status(204).end();
   });
   app.use("/api", (_req, res) =>
-    res
-      .status(404)
-      .json({
-        error: { code: "NOT_FOUND", message: "This API route does not exist." },
-      }),
+    res.status(404).json({
+      error: { code: "NOT_FOUND", message: "This API route does not exist." },
+    }),
   );
   app.use(
     (
@@ -354,61 +459,51 @@ export function createApp(store: MealStore, config: Config) {
           .status(error.status)
           .json({ error: { code: error.code, message: error.message } });
       if (error instanceof z.ZodError)
-        return res
-          .status(400)
-          .json({
-            error: {
-              code: "VALIDATION_ERROR",
-              message: error.issues
-                .map((i) => `${i.path.join(".")}: ${i.message}`)
-                .join("; "),
-            },
-          });
+        return res.status(400).json({
+          error: {
+            code: "VALIDATION_ERROR",
+            message: error.issues
+              .map((i) => `${i.path.join(".")}: ${i.message}`)
+              .join("; "),
+          },
+        });
       if (error instanceof multer.MulterError)
-        return res
-          .status(400)
-          .json({
-            error: {
-              code: error.code,
-              message:
-                error.code === "LIMIT_FILE_SIZE"
-                  ? "Photo must be 8 MB or smaller."
-                  : "Upload one photo and a description of up to 3,000 characters.",
-            },
-          });
+        return res.status(400).json({
+          error: {
+            code: error.code,
+            message:
+              error.code === "LIMIT_FILE_SIZE"
+                ? "Photo must be 8 MB or smaller."
+                : "Upload one photo and a description of up to 3,000 characters.",
+          },
+        });
       if (error instanceof SyntaxError)
-        return res
-          .status(400)
-          .json({
-            error: {
-              code: "INVALID_JSON",
-              message:
-                "The request could not be read. Please reload and try again.",
-            },
-          });
+        return res.status(400).json({
+          error: {
+            code: "INVALID_JSON",
+            message:
+              "The request could not be read. Please reload and try again.",
+          },
+        });
       if ((error as { status?: number })?.status === 413)
-        return res
-          .status(413)
-          .json({
-            error: {
-              code: "TOO_LARGE",
-              message:
-                "This request is too large. Shorten the description or remove some food rows.",
-            },
-          });
+        return res.status(413).json({
+          error: {
+            code: "TOO_LARGE",
+            message:
+              "This request is too large. Shorten the description or remove some food rows.",
+          },
+        });
       // Never log request bodies, images, provider headers, or credentials.
       console.error(
         "An unexpected API error occurred:",
         error instanceof Error ? error.name : "unknown",
       );
-      res
-        .status(500)
-        .json({
-          error: {
-            code: "INTERNAL_ERROR",
-            message: "Something went wrong on the server. Please try again.",
-          },
-        });
+      res.status(500).json({
+        error: {
+          code: "INTERNAL_ERROR",
+          message: "Something went wrong on the server. Please try again.",
+        },
+      });
     },
   );
   return app;

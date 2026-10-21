@@ -38,27 +38,56 @@ test("account, onboarding, plan, photo fallback, corrections and diary lifecycle
   await expect(
     page.getByRole("heading", { name: "Your daily meal plan", exact: true }),
   ).toBeVisible();
-  await expect(page.getByRole("tab")).toHaveCount(7);
-  await page.getByRole("tab", { name: /^Mon/ }).click();
+  await expect(page.getByRole("tab")).toHaveCount(30);
+  await expect(
+    page.getByRole("checkbox", { name: "Completed Day 1", exact: true }),
+  ).toBeDisabled();
+  await page
+    .getByRole("button", { name: "Start my free plan", exact: true })
+    .click();
+  await page
+    .getByRole("checkbox", { name: "Completed Day 1", exact: true })
+    .check();
+  await expect(
+    page.locator(".program-stats > div").nth(1).locator("strong"),
+  ).toHaveText("29");
+  await page.reload();
+  await page
+    .getByRole("button", { name: "My nutrition plan", exact: true })
+    .click();
+  await expect(
+    page.getByRole("checkbox", { name: "Completed Day 1", exact: true }),
+  ).toBeChecked();
+  await expect(
+    page.locator(".program-stats > div").nth(1).locator("strong"),
+  ).toHaveText("29");
+  await page
+    .getByRole("checkbox", { name: "Completed Day 1", exact: true })
+    .uncheck();
+  await expect(
+    page.locator(".program-stats > div").nth(1).locator("strong"),
+  ).toHaveText("30");
+  await expect(
+    page.getByRole("button", { name: "Get lifetime access" }),
+  ).toBeDisabled();
+  await page.getByRole("tab", { name: /^Day 1 / }).click();
   await expect(page.locator(".plan-meal")).toHaveCount(4);
   await expect(page.locator(".plan-meal-header h3")).toHaveText(
-    responseBody.plan.week[0].menu.map((meal: any) => meal.title),
+    responseBody.plan.days[0].menu.map((meal: any) => meal.title),
   );
   await expect(
     page.locator(".day-nutrition-summary .comparison-kcal > strong"),
   ).toHaveText(
-    `${Math.round(responseBody.plan.week[0].totals.kcal).toLocaleString()}kcal`,
+    `${Math.round(responseBody.plan.days[0].totals.kcal).toLocaleString()}kcal`,
   );
-  await page.getByRole("tab", { name: /^Tue/ }).click();
-  await expect(page.locator(".day-plan-heading h4")).toHaveText(
-    "Tuesday’s menu",
-  );
+  await page.getByRole("tab", { name: /^Day 2 / }).click();
+  await expect(page.locator(".day-plan-heading h4")).toHaveText("Day 2’s menu");
   await expect(page.locator(".plan-meal-header h3")).toHaveText(
-    responseBody.plan.week[1].menu.map((meal: any) => meal.title),
+    responseBody.plan.days[1].menu.map((meal: any) => meal.title),
   );
   await page.locator(".meal-preparation summary").first().click();
   await expect(page.locator(".meal-preparation ol").first()).toBeVisible();
-  await page.getByText("Ingredients for tuesday").click();
+  await page.getByText("Ingredients for day 2").click();
   await expect(page.locator(".shopping-list ul")).toBeVisible();
   const colors = await page
     .locator(".plan-meal")
@@ -87,7 +116,7 @@ test("account, onboarding, plan, photo fallback, corrections and diary lifecycle
     page.getByRole("heading", { name: "Your meal, estimated" }),
   ).toBeVisible();
   await expect(page.locator(".food-row")).toHaveCount(
-    responseBody.plan.week[1].menu[0].items.length,
+    responseBody.plan.days[1].menu[0].items.length,
   );
   await expect(page.locator(".daily-calories strong")).toHaveText("0");
   await page.getByRole("button", { name: "Discard estimate" }).click();

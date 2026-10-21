@@ -39,7 +39,7 @@ Numerical calculations retain precision and are rounded only for display.
 `npm test` tests genuine calculations against the extracted nutrient data,
 explicit-quantity precedence, unknown-food questions, oil recipe handling,
 provider request/response contracts, target/menu calculations, allergy filtering,
-age/timeline guards, seven-day variety, whole-unit portions, and actual HTTP requests against a real temporary SQLite
+age/timeline guards, 30-day variety, whole-unit portions, and actual HTTP requests against a real temporary SQLite
 database. The API lifecycle covers confirmation, duplicate-save protection,
 account isolation, stale-edit rejection, persistence, edits, deletion and totals.
 Photos test decoding, missing-key behavior and absence of on-disk image files.
@@ -68,11 +68,31 @@ is limited to good matches to the nutrient catalog; unsupported mixed dishes
 are not silently assigned unrelated calories. Users can expand food choices via
 USDA search, but still need to choose the correct cooked/uncooked record.
 
-The seven-day meal plan is a transparent menu optimizer in `server/menu.ts`, using real nutrient references and practical portion increments. It is not an AI-invented meal plan.
+The 30-day meal plan is a transparent menu optimizer in `server/menu.ts`, using real nutrient references and practical portion increments. It is not an AI-invented meal plan.
 It cannot model every cuisine, allergy, health condition or individual energy
-need. It reports each day’s actual menu totals, comparison with the targets, preparation notes, approximate household portions, and mismatch warnings. The plan page exposes Monday–Sunday tabs, four meals per day, and an ingredient checklist. Noneligible profiles see an explicit explanation rather than a missing menu. Tracking and targets
+need. It reports each day’s actual menu totals, comparison with the targets, preparation notes, approximate household portions, and mismatch warnings. The plan page exposes Day 1–30 selection and completion checkboxes, four meals per day, and an ingredient checklist. Noneligible profiles see an explicit explanation rather than a missing menu. Tracking and targets
 remain distinct: reviewing a suggested meal never automatically logs it.
 
 ## Interface palette
 
 The app uses charcoal `#101115`, raised gray cards `#1b1d23`, off-white text, warm amber `#ddb783` for primary actions and calories, muted violet `#c0a9e4` for protein, and pale blue `#9dbedc` for fat. Shared palette variables are in `src/styles.css`. Green/olive interface backgrounds have been replaced; the food illustration keeps natural ingredient colors.
+
+## Program progress and payment API
+
+`GET /api/plan-program` returns the signed-in account’s current snapshot,
+completion day numbers, remaining checklist count, separate free-period expiry,
+and lifetime status. `POST /api/plan-program/start` begins the free period once.
+`PUT /api/plan-program/:id/days/:day` sets a boolean completion state idempotently;
+`POST /api/plan-program/next` is lifetime-only and preserves prior cycle summaries.
+Expiry and ownership are enforced by the server, not browser timestamps. Completed
+day snapshots retain their own targets when pending days change with the profile.
+An expired account cannot generate a fresh plan through the profile endpoint.
+
+`POST /api/billing/orders` fixes the price at INR 999. `POST /api/billing/verify`
+checks an owned order, a HMAC signature and the provider’s captured payment record.
+`POST /api/billing/status` recovers missed callbacks. `POST /api/billing/webhook`
+uses the raw request bytes and a separate signature; it handles captured payments
+and verified full refunds. Grants and refund revocation are idempotent. Checkout
+is disabled until configured, and production rejects test checkout keys.
+The new SQLite tables are additive; existing accounts and meal rows are retained.
+See [PAYMENTS.md](PAYMENTS.md) and [PHOTO-SETUP.md](PHOTO-SETUP.md).

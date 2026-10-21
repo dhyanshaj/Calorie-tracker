@@ -37,6 +37,9 @@ export default defineConfig({
       DATABASE_PATH: `.data/browser-${process.pid}.sqlite`,
       MEAL_VISION_API_KEY: "",
       USDA_API_KEY: "",
+      RAZORPAY_KEY_ID: "",
+      RAZORPAY_KEY_SECRET: "",
+      RAZORPAY_WEBHOOK_SECRET: "",
     },
   },
 });

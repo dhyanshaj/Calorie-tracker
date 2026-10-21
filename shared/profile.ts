@@ -118,6 +118,7 @@ export type PlannedMeal = {
 };
 export type MealPlanDay = {
   day: string;
+  targets: Nutrients;
   menu: PlannedMeal[];
   totals: Nutrients;
   closeToTargets: boolean;
@@ -131,6 +132,7 @@ export type DailyPlan = {
   notes: string[];
   menu: PlannedMeal[];
   week: MealPlanDay[];
+  days: MealPlanDay[];
   menuTotals: Nutrients;
   barrierTips: { barrier: string; tip: string }[];
 };

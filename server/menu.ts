@@ -1,6 +1,7 @@
 import { foodById } from "../shared/catalog";
 import { emptyNutrients, sumNutrients } from "../shared/nutrition";
 import type { MealPlanDay, PlannedMeal, Profile } from "../shared/profile";
+import { PLAN_LENGTH } from "../shared/program";
 import type { Nutrients } from "../shared/types";
 
 type Serving = [id: string, grams: number, min: number, max: number];
@@ -332,13 +333,16 @@ function buildDay(
   targets: Nutrients,
   index: number,
 ): MealPlanDay {
-  const entries = templates[index].flatMap((servings, slot) =>
-    servings.flatMap((s) => {
-      const selected = substitute(s, profile);
-      if (!selected) return [];
-      const [id, grams, min, max] = selected;
-      return [{ slot, id, grams, min, max, n: foodById.get(id)!.per100 }];
-    }),
+  const round = Math.floor(index / 7);
+  const entries = slots.flatMap((_, slot) =>
+    templates[(index + round * (slot + 1)) % templates.length][slot].flatMap(
+      (s) => {
+        const selected = substitute(s, profile);
+        if (!selected) return [];
+        const [id, grams, min, max] = selected;
+        return [{ slot, id, grams, min, max, n: foodById.get(id)!.per100 }];
+      },
+    ),
   );
   // Merge substitutions that resolve to the same ingredient in the same meal.
   for (let i = entries.length - 1; i >= 0; i--) {
@@ -427,11 +431,26 @@ function buildDay(
     Math.abs(totals.kcal - targets.kcal) <= targets.kcal * 0.1 &&
     Math.abs(totals.protein - targets.protein) <= targets.protein * 0.15 &&
     Math.abs(totals.fat - targets.fat) <= targets.fat * 0.15;
-  return { day: days[index], menu, totals, closeToTargets };
+  return {
+    day: `Day ${index + 1}`,
+    targets: { ...targets },
+    menu,
+    totals,
+    closeToTargets,
+  };
 }
 export function buildWeekMenu(
   profile: Profile,
   targets: Nutrients,
 ): MealPlanDay[] {
   return days.map((_, index) => buildDay(profile, targets, index));
+}
+
+export function buildMonthMenu(
+  profile: Profile,
+  targets: Nutrients,
+): MealPlanDay[] {
+  return Array.from({ length: PLAN_LENGTH }, (_, index) =>
+    buildDay(profile, targets, index),
+  );
 }
