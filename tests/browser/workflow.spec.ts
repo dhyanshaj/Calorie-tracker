@@ -68,8 +68,15 @@ test("account, onboarding, plan, photo fallback, corrections and diary lifecycle
     page.locator(".program-stats > div").nth(1).locator("strong"),
   ).toHaveText("30");
   await expect(
-    page.getByRole("button", { name: "Get lifetime access" }),
+    page.getByRole("button", { name: "Subscribe for ₹499/month" }),
   ).toBeDisabled();
+  await expect(page.locator(".subscription-card")).toContainText(
+    "₹499 per month",
+  );
+  await expect(page.locator(".subscription-card")).toContainText(
+    "No automatic charge at trial end",
+  );
+  await expect(page.locator(".subscription-card")).not.toContainText("999");
   await page.getByRole("tab", { name: /^Day 1 / }).click();
   await expect(page.locator(".plan-meal")).toHaveCount(4);
   await expect(page.locator(".plan-meal-header h3")).toHaveText(

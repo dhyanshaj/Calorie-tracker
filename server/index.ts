@@ -16,6 +16,7 @@ const app = createApp(store, {
     keyId: process.env.RAZORPAY_KEY_ID,
     keySecret: process.env.RAZORPAY_KEY_SECRET,
     webhookSecret: process.env.RAZORPAY_WEBHOOK_SECRET,
+    planId: process.env.RAZORPAY_PLAN_ID,
   },
 });
 const port = Number(process.env.PORT ?? 3000);

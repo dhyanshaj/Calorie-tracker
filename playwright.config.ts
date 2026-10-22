@@ -40,6 +40,7 @@ export default defineConfig({
       RAZORPAY_KEY_ID: "",
       RAZORPAY_KEY_SECRET: "",
       RAZORPAY_WEBHOOK_SECRET: "",
+      RAZORPAY_PLAN_ID: "",
     },
   },
 });

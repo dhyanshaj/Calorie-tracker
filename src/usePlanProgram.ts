@@ -47,6 +47,19 @@ export function usePlanProgram() {
       current = false;
     };
   }, []);
+  useEffect(() => {
+    const now = Date.now();
+    const boundaries = [state?.access.trialEndsAt, state?.access.paidUntil]
+      .filter((value): value is string => !!value)
+      .map((value) => new Date(value).getTime())
+      .filter((value) => value > now);
+    if (!boundaries.length) return;
+    const timer = window.setTimeout(
+      () => void refresh(),
+      Math.min(Math.min(...boundaries) - now + 1000, 2147483647),
+    );
+    return () => window.clearTimeout(timer);
+  }, [state?.access.trialEndsAt, state?.access.paidUntil, refresh]);
   async function mutate(url: string, body?: unknown, method = "POST") {
     if (busyRef.current) return false;
     busyRef.current = true;

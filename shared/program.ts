@@ -1,12 +1,21 @@
 import type { DailyPlan } from "./profile";
 export const PLAN_LENGTH = 30;
-export const LIFETIME_PRICE_PAISE = 99900;
+export const MONTHLY_PRICE_PAISE = 49900;
+export type PlanSubscription = {
+  id: string;
+  status: string;
+  cancelAtPeriodEnd: boolean;
+  nextChargeAt: string | null;
+};
 export type PlanAccess = {
-  status: "not_started" | "free" | "expired" | "lifetime";
+  status: "not_started" | "free" | "expired" | "subscribed" | "legacy_lifetime";
   trialStartedAt: string | null;
   trialEndsAt: string | null;
   freeDaysRemaining: number;
-  hasLifetime: boolean;
+  hasPaidPlan: boolean;
+  hasLegacyLifetime: boolean;
+  paidUntil: string | null;
+  subscription: PlanSubscription | null;
   canTrack: boolean;
   checkoutAvailable: boolean;
   pricePaise: number;
@@ -32,7 +41,7 @@ export type ProgramState = {
     startedAt: string;
   }[];
 };
-export type CheckoutOrder = {
+export type CheckoutSubscription = {
   id: string;
   amount: number;
   currency: "INR";

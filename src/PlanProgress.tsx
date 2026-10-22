@@ -10,10 +10,10 @@ import {
   Sparkles,
 } from "lucide-react";
 import type { Account } from "../shared/profile";
-import type { CheckoutOrder, ProgramState } from "../shared/program";
+import type { CheckoutSubscription, ProgramState } from "../shared/program";
 import { api } from "./api";
 type CheckoutResponse = {
-  razorpay_order_id: string;
+  razorpay_subscription_id: string;
   razorpay_payment_id: string;
   razorpay_signature: string;
 };
@@ -76,10 +76,26 @@ export function PlanProgress({
 }) {
   const [paying, setPaying] = useState(false),
     [paymentError, setPaymentError] = useState(""),
-    [paymentNotice, setPaymentNotice] = useState("");
+    [paymentNotice, setPaymentNotice] = useState(""),
+    [confirmCancel, setConfirmCancel] = useState(false);
   const access = state?.access,
     program = state?.program;
-  const paid = access?.hasLifetime;
+  const paid = access?.hasPaidPlan;
+  const subscription = access?.subscription;
+  const ended =
+    !!subscription &&
+    ["cancelled", "completed", "expired"].includes(subscription.status);
+  const renewalOff = ended || !!subscription?.cancelAtPeriodEnd;
+  const canCancel = !!subscription && !renewalOff;
+  const maySubscribe =
+    access?.status === "expired" &&
+    !paid &&
+    (!subscription || ended || subscription.status === "created");
+  const paidUntil = access?.paidUntil
+    ? new Date(access.paidUntil).toLocaleDateString(undefined, {
+        dateStyle: "medium",
+      })
+    : null;
   async function checkPayment() {
     if (paying) return;
     setPaying(true);
@@ -90,9 +106,9 @@ export function PlanProgress({
       });
       onState(next);
       setPaymentNotice(
-        next.access.hasLifetime
-          ? "Lifetime access is active. Thank you!"
-          : "No captured payment has been confirmed yet. Do not pay again if your bank shows a debit; check again shortly.",
+        next.access.hasPaidPlan
+          ? "Your paid planning access is active. Subscription details have been refreshed."
+          : "No current paid month has been confirmed. If your bank shows a debit, check again shortly before starting another payment.",
       );
     } catch (error) {
       setPaymentError(
@@ -105,22 +121,24 @@ export function PlanProgress({
     }
   }
   async function buy() {
-    if (paying || !access?.checkoutAvailable) return;
+    if (paying || !access?.checkoutAvailable || !maySubscribe) return;
     setPaying(true);
     setPaymentError("");
     setPaymentNotice("");
     try {
-      const order = await api<CheckoutOrder>("/api/billing/orders", {
-        method: "POST",
-      });
+      const subscription = await api<CheckoutSubscription>(
+        "/api/billing/subscriptions",
+        {
+          method: "POST",
+        },
+      );
+      onState(await api<ProgramState>("/api/plan-program"));
       await loadCheckout();
       const checkout = new window.Razorpay!({
-        key: order.keyId,
-        amount: order.amount,
-        currency: order.currency,
-        order_id: order.id,
-        name: order.name,
-        description: order.description,
+        key: subscription.keyId,
+        subscription_id: subscription.id,
+        name: subscription.name,
+        description: subscription.description,
         prefill: { name: user.name, email: user.email },
         theme: { color: "#ddb783" },
         modal: { ondismiss: () => setPaying(false) },
@@ -132,7 +150,11 @@ export function PlanProgress({
               body: JSON.stringify(response),
             });
             onState(confirmed);
-            setPaymentNotice("Lifetime access is active. No renewal payments.");
+            setPaymentNotice(
+              confirmed.access.hasPaidPlan
+                ? "Your ₹499/month plan is active. It renews monthly unless you cancel renewal."
+                : "Authorization received. Planning activates after the first ₹499 monthly payment is confirmed. Use Check subscription status shortly.",
+            );
           } catch (error) {
             setPaymentError(
               error instanceof Error
@@ -155,6 +177,33 @@ export function PlanProgress({
       setPaymentError(
         error instanceof Error ? error.message : "Could not open checkout.",
       );
+      setPaying(false);
+    }
+  }
+  async function cancelRenewal() {
+    if (paying || !subscription || !canCancel) return;
+    setPaying(true);
+    setPaymentError("");
+    setPaymentNotice("");
+    try {
+      const next = await api<ProgramState>(
+        `/api/billing/subscriptions/${subscription.id}/cancel`,
+        { method: "POST" },
+      );
+      onState(next);
+      setConfirmCancel(false);
+      setPaymentNotice(
+        next.access.hasPaidPlan
+          ? "Renewal is cancelled. Your verified paid access remains available through the paid period shown above."
+          : "Subscription cancelled. No further monthly renewals will be requested.",
+      );
+    } catch (error) {
+      setPaymentError(
+        error instanceof Error
+          ? error.message
+          : "Could not confirm cancellation. Please retry.",
+      );
+    } finally {
       setPaying(false);
     }
   }
@@ -189,8 +238,8 @@ export function PlanProgress({
             </h3>
             <p>
               {paid
-                ? "Lifetime meal planning is active. Start a plan to save your daily checklist."
-                : "Your 30-calendar-day free period begins when you press Start. No payment details needed. Afterward, lifetime meal planning is ₹999 once, with no automatic renewal."}
+                ? "Your paid meal planning is active. Start a plan to save your daily checklist."
+                : "Your 30-calendar-day free period begins when you press Start. No payment details needed. Afterward, choose ₹499/month meal planning. You are not charged automatically when the free period ends."}
             </p>
           </div>
           <button
@@ -222,10 +271,12 @@ export function PlanProgress({
                     : "A little progress, every day."}
                 </h3>
               </div>
-              <span className={`access-badge ${paid ? "lifetime" : ""}`}>
+              <span className={`access-badge ${paid ? "paid" : ""}`}>
                 {paid ? <Sparkles size={13} /> : <Clock3 size={13} />}{" "}
                 {paid
-                  ? "Lifetime access"
+                  ? access?.hasLegacyLifetime
+                    ? "Existing lifetime access"
+                    : "Monthly plan"
                   : access?.status === "expired"
                     ? "Free period ended"
                     : `${access?.freeDaysRemaining} free access days left`}
@@ -312,24 +363,72 @@ export function PlanProgress({
           </div>
         </>
       )}
-      {state && !paid && (
+      {state && !access?.hasLegacyLifetime && (
         <div
-          className={`lifetime-card ${access?.status === "expired" ? "expired" : ""}`}
+          className={`subscription-card ${access?.status === "expired" ? "expired" : ""}`}
         >
-          <span className="lifetime-symbol">
+          <span className="subscription-symbol">
             <LockKeyhole size={20} />
           </span>
           <div>
-            <span className="eyebrow">ONE PAYMENT. NO RENEWALS.</span>
+            <span className="eyebrow">
+              {renewalOff
+                ? "RENEWAL CANCELLED"
+                : "MONTHLY MEMBERSHIP · CANCEL RENEWAL ANYTIME"}
+            </span>
             <h3>
-              {access?.status === "expired"
-                ? "Continue with lifetime meal planning"
-                : "Keep planning after your free month"}
+              {paid
+                ? "Your monthly meal-planning membership"
+                : access?.status === "expired"
+                  ? "Continue meal planning"
+                  : "Keep planning after your free month"}
             </h3>
             <p>
-              ₹999 once for continued meal plans and checklists. Your saved
-              diary remains available when the free period ends.
+              ₹499 per month for meal plans and checklists. Once you subscribe,
+              billing renews monthly unless you cancel renewal. Your saved diary
+              remains available when planning access ends.
             </p>
+            {paidUntil && (
+              <p className="subscription-dates">
+                {paid ? "Paid access through" : "Last paid period ended"}{" "}
+                {paidUntil}.{renewalOff ? " Renewal is cancelled." : ""}
+              </p>
+            )}
+            {subscription?.nextChargeAt && !renewalOff && (
+              <p className="subscription-dates">
+                Next charge scheduled:{" "}
+                {new Date(subscription.nextChargeAt).toLocaleDateString(
+                  undefined,
+                  { dateStyle: "medium" },
+                )}
+                .
+              </p>
+            )}
+            {subscription && (
+              <small>
+                Subscription:{" "}
+                {(
+                  {
+                    created: "Setup not completed",
+                    authenticated: "Authorization received",
+                    active: "Active",
+                    pending: "Payment pending",
+                    halted: "Renewal payment failed",
+                    paused: "Paused",
+                    cancelled: "Cancelled",
+                    completed: "Ended",
+                    expired: "Setup expired",
+                  } as Record<string, string>
+                )[subscription.status] ?? subscription.status}
+                .
+              </small>
+            )}
+            {!paid && access?.status !== "expired" && (
+              <small>
+                Subscribe after your 30-calendar-day free period. No automatic
+                charge at trial end.
+              </small>
+            )}
             {state.paymentMode === "test" && access?.checkoutAvailable && (
               <small>
                 Test checkout only. No real money is charged in this mode.
@@ -338,36 +437,85 @@ export function PlanProgress({
             {!access?.checkoutAvailable && (
               <small>
                 Payments are not enabled yet. The app owner needs to finish
-                Razorpay setup.
+                Razorpay Subscriptions setup.
               </small>
             )}
           </div>
-          <div className="lifetime-purchase">
+          <div className="subscription-purchase">
             <strong>
-              ₹999<small>one time</small>
+              ₹499<small>per month</small>
             </strong>
-            <button
-              className="button button-primary"
-              disabled={!access?.checkoutAvailable || paying}
-              onClick={() => void buy()}
-            >
-              {paying ? (
-                <LoaderCircle className="spin" size={16} />
-              ) : (
-                <>
-                  <CreditCard size={15} />
-                  Get lifetime access
-                </>
+            {!paid &&
+              (!subscription || ended || subscription.status === "created") && (
+                <button
+                  className="button button-primary"
+                  disabled={
+                    !access?.checkoutAvailable || paying || !maySubscribe
+                  }
+                  onClick={() => void buy()}
+                >
+                  {paying ? (
+                    <LoaderCircle className="spin" size={16} />
+                  ) : (
+                    <>
+                      <CreditCard size={15} />
+                      {subscription?.status === "created"
+                        ? "Continue subscription setup"
+                        : "Subscribe for ₹499/month"}
+                    </>
+                  )}
+                </button>
               )}
-            </button>
-            <button
-              className="text-button payment-status"
-              disabled={!access?.checkoutAvailable || paying}
-              onClick={() => void checkPayment()}
-            >
-              Already paid? Check status
-            </button>
+            {subscription && (
+              <button
+                className="text-button payment-status"
+                disabled={!access?.checkoutAvailable || paying}
+                onClick={() => void checkPayment()}
+              >
+                Check subscription status
+              </button>
+            )}
+            {canCancel && !confirmCancel && (
+              <button
+                className="text-button"
+                disabled={paying || !access?.checkoutAvailable}
+                onClick={() => setConfirmCancel(true)}
+              >
+                Cancel renewal
+              </button>
+            )}
           </div>
+          {confirmCancel && canCancel && (
+            <div
+              className="subscription-cancel"
+              role="group"
+              aria-label="Confirm subscription cancellation"
+            >
+              <p>
+                Stop future monthly renewals?
+                {paidUntil
+                  ? ` Your paid access continues through ${paidUntil}.`
+                  : " Any verified paid period stays available."}{" "}
+                This does not request a refund.
+              </p>
+              <div>
+                <button
+                  className="button button-white"
+                  disabled={paying}
+                  onClick={() => setConfirmCancel(false)}
+                >
+                  Keep subscription
+                </button>
+                <button
+                  className="button button-primary"
+                  disabled={paying}
+                  onClick={() => void cancelRenewal()}
+                >
+                  {paying ? "Cancelling…" : "Confirm cancellation"}
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
       {paymentError && (

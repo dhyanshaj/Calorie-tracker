@@ -240,8 +240,9 @@ export function PlanView({
           </div>
           {progress.state?.access.status === "expired" && (
             <p className="plan-expired-note">
-              Your past plan is read-only. Lifetime access enables continued
-              checklists and new plans.
+              Your past plan is read-only. A ₹499/month subscription enables
+              continued checklists and new plans while your paid access is
+              active.
             </p>
           )}
           <div

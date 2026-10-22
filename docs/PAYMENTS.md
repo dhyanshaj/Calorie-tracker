@@ -1,86 +1,130 @@
-# Free plan and ₹999 lifetime access
+# 30 calendar days free, then ₹499 per month
 
-The selected offer is:
+## Customer terms implemented
 
-- A 30-day meal plan with a personal completion checklist.
+- A 30-day meal plan with a personal, persistent completion checklist.
 - 30 consecutive calendar days free, beginning only when the user presses
-  **Start my free plan**. Server timestamps determine expiry; refreshing,
-  signing out, or unticking days does not restart the free period.
-- **₹999 INR once for lifetime meal-planning access**, without a subscription
-  or automatic renewal.
-- Checklist progress is separate from the food diary. Ticking a day is a
-  self-reported completion note; it does not create meals or alter nutrition.
-- After the free period, the previous plan/checklist is read-only. The existing
-  diary stays accessible. Lifetime users can track again and start another
-  30-day plan after completing the current checklist or reaching its end date.
-- Past checklist summaries remain saved when a new plan begins. Updating a
-  profile during active access refreshes pending days and preserves completed
-  meal snapshots and the targets that applied to them.
+  **Start my free plan**. Server timestamps determine expiry. Refreshing,
+  signing out, or unticking days never restarts the free period.
+- No payment details during the trial and no automatic charge when it ends.
+  After expiry, the user may explicitly authorize **₹499 INR per month**.
+- A subscribed user is billed every calendar month by Razorpay until renewal
+  is cancelled or the provider ends the subscription. A monthly billing period
+  is not necessarily 30 days. Razorpay requires a finite cycle count; this
+  integration uses its documented maximum of 1,200 monthly cycles (100 years).
+- **Cancel renewal** is available on the plan page, with a confirmation step.
+  Paid access continues through the verified paid period. Uncharged mandates
+  are cancelled immediately. Cancellation does not automatically request a refund.
+- A failed renewal does not extend access. After free/paid access expires, the
+  saved plan/checklist becomes read-only; the food diary remains available.
+- Checklist progress is self-reported and separate from the diary. A tick does
+  not create food entries, change nutrition totals, or verify what was eaten.
+- Subscribers can start another 30-day plan after completing the current
+  checklist or reaching its 30-day end. Older checklist summaries remain saved.
+  Profile edits refresh pending days and retain completed meal/target snapshots.
+- The old ₹999 lifetime offer is retired for new purchases. Any already fulfilled
+  legacy lifetime purchases remain honored, without adding recurring charges.
 
-The app does not claim that a tick verifies what a person actually ate or that
-following a checklist guarantees weight or muscle changes.
+## Configure Razorpay Subscriptions
 
-## Razorpay configuration
+Create a merchant account at https://dashboard.razorpay.com/signup. Complete its
+business/bank activation and recurring-payment requirements. Use test mode first.
 
-Create a merchant account at https://dashboard.razorpay.com/signup and complete
-Razorpay’s account/bank/business activation requirements. Use test mode to verify
-the integration before enabling actual purchases.
+Create a provider **Plan** with these exact settings:
 
-Set these variables only on the Node server, in an untracked local `.env` for
-development or the deployment host’s encrypted secret/environment manager:
+| Setting        | Value              |
+| -------------- | ------------------ |
+| Billing period | Monthly            |
+| Interval       | 1                  |
+| Amount         | ₹499 = 49900 paise |
+| Currency       | INR                |
+| Quantity       | 1                  |
+
+Do not attach add-ons, discounts, or tax rules that change the captured total.
+The server rejects a different amount, currency, period, interval or quantity.
+It does not calculate extra tax or generate its own tax invoices. Finalize the
+applicable GST/invoicing treatment and the customer-facing total before launch.
+
+Set these values only on the actual Node host, in an untracked `.env` locally or
+the deployment host’s encrypted server environment/secret manager:
 
 ```dotenv
 RAZORPAY_KEY_ID=YOUR_KEY_ID
 RAZORPAY_KEY_SECRET=YOUR_KEY_SECRET
 RAZORPAY_WEBHOOK_SECRET=YOUR_WEBHOOK_SECRET
+RAZORPAY_PLAN_ID=YOUR_MONTHLY_PLAN_ID
 ```
 
-These are placeholders, not credentials. The public key ID goes to Checkout;
-the key secret and webhook secret never go to the browser. HMAC verification
-requires the actual server-side secret values, so a proxy placeholder alone is
-not sufficient. Do not put these secrets in chat, source control, VITE_ variables,
-or saved setup scripts.
+Use a plan ID from the same merchant account and test/live mode as the keys.
+The key secret and webhook secret never go to the browser. HMAC verification
+requires actual server-side secret values; proxy-only placeholders are not
+sufficient. Do not put secrets in chat, GitHub, VITE\_ variables or setup scripts.
 
-In Razorpay, configure a webhook for your **actual hosted HTTPS address**, at
-`/api/billing/webhook`. Subscribe to `payment.captured`, `refund.processed`, and
-`payment.refunded` when available, and configure the matching webhook secret.
-A Chromebook localhost address is not a publicly reachable webhook destination.
-Configure payment auto-capture in the merchant dashboard. Checkout confirmation
-and a **Check payment status** recovery action also verify captured payments
-server-side if a user closes the browser before a callback completes.
+Configure a webhook for your actual **hosted HTTPS address** at
+`/api/billing/webhook`, with the matching webhook secret. Enable subscription
+events supported by your account, including `subscription.authenticated`,
+`subscription.activated`, `subscription.charged`, `subscription.pending`,
+`subscription.halted`, `subscription.cancelled`, `subscription.completed`,
+`subscription.paused` and `subscription.resumed`, plus `refund.processed` and
+`payment.refunded` where available. Lifecycle callbacks reconcile current
+provider state instead of trusting event ordering. A Chromebook localhost URL
+is not a public webhook destination.
 
-Allow HTTPS access to `api.razorpay.com` from the server. The browser loads
-Razorpay Checkout from `checkout.razorpay.com` only when the user opens checkout.
+Allow HTTPS from the server to `api.razorpay.com`. The browser loads Checkout
+from `checkout.razorpay.com` only when opening a subscription. Name/email are
+prefilled with the signed-in account’s details at that point. Card/bank details
+are handled by the provider and are not stored by this app.
 
-Checkout remains disabled until the required credentials are set. Production
-mode also requires a `rzp_live_` key ID; test keys cannot open paid checkout in
-production. In development, test mode is visibly labeled and must not be
-presented as a real payment. Restart the server after changing configuration.
+Restart the server after changing configuration. Missing configuration keeps
+checkout disabled. Production mode requires `rzp_live_` credentials and rejects
+test webhook fulfillment. Development test checkout is clearly labeled.
 
-## What the integration verifies
+## Verification and renewal behavior
 
-The server creates a fixed **99900-paise INR** order linked to the signed-in
-account. It checks ownership, a timing-safe HMAC signature, and the provider’s
-payment record for the exact amount, currency, order, and captured status before
-setting lifetime access. A browser “success” callback alone does not grant access.
-Repeated callbacks and webhooks are idempotent. Payment-status recovery checks
-Razorpay directly. Signed full-refund events revoke the matching lifetime grant;
-partial refunds leave it intact. No customer card numbers are stored by this app.
+The server creates/reuses one account-owned subscription after trial expiry;
+concurrent requests cannot create duplicate subscriptions in this single-process
+deployment. The Checkout signature uses `payment_id|subscription_id` with the
+stored owned subscription ID. Authorization alone never unlocks a paid month.
 
-Tests use explicit provider fixtures and real local database/HTTP operations.
-They do not perform live payments. Merchant checkout, webhooks, bank settlement,
-and live refunds need validation against a real configured Razorpay account
-before charging customers.
+The server fetches the provider subscription, its exact monthly plan, paginated
+invoices and matching captured payments. An invoice must be paid in full, belong
+to that subscription, match its payment/order, have a finite billing period,
+and total exactly INR 499. Only verified invoice periods grant time-limited
+access. Renewal webhooks extend access to the new paid period. **Check subscription
+status** recovers missed callbacks without requesting another subscription.
 
-## Before public launch
+Access expires locally at the verified period end even if webhooks are delayed
+or the provider is unreachable. Existing paid time is retained on network errors.
+Cancellation at the paid cycle end stops future renewals and preserves that
+time. An uncharged mandate is cancelled immediately. Signed full refunds revoke
+only the matching paid period; partial refunds leave it active. A refund does
+not itself cancel the recurring mandate. Refunded ledger entries cannot be
+restored by replayed or stale events. Old accounts, trial dates, checklists and
+meal records are preserved by additive database migrations.
 
-Host the backend and persistent database on a server you control; copies of the
-open-source app running on customers’ own machines cannot enforce a paid service.
-Finalize your privacy policy, terms defining lifetime access, support/refund
-process, and applicable GST/invoicing treatment. The integration charges exactly
-₹999; it does not calculate extra taxes or generate tax invoices.
+## What remains to verify before taking money
 
-Add email verification and password recovery before offering general public
-accounts. Decide on a photo-analysis usage allowance: lifetime meal planning is
-cheap to compute, but every external AI photo request can incur ongoing costs.
-₹999 lifetime access should not silently promise unlimited third-party AI usage.
+Automated tests use explicitly labeled provider fixtures, real SQLite and local
+HTTP, plus a simulated browser Checkout. They exercise trial boundaries, monthly
+expiry, owned checkout, bad signatures, wrong price/plan/quantity, captured versus
+authorized payments, renewals, cancellation, full refunds, retries and account
+isolation. They do not make actual provider charges.
+
+With a configured merchant account, validate authorization and the first ₹499
+charge, a second renewal, declined/retried payments, pre-debit communications,
+signed webhook delivery, cancellation and refunds. Confirm supported recurring
+payment methods, any customer mandate limits, and settlement in Razorpay.
+
+Host the backend and persistent database on a server you control. Customer-owned
+copies of this open-source local app cannot enforce a paid hosted service.
+Complete email verification/recovery, account deletion, privacy/terms/refund
+policies, database backups and monitoring before a general public launch.
+Define any photo-analysis allowance explicitly: a ₹499 meal-planning subscription
+does not silently promise unlimited paid third-party AI processing.
+
+Provider references inspected for this integration:
+
+- [Subscription Checkout and signature verification](https://razorpay.com/docs/payments/subscriptions/integration-guide/)
+- [Create a subscription](https://razorpay.com/docs/api/payments/subscriptions/create-subscription/)
+- [Fetch subscription invoices](https://razorpay.com/docs/api/payments/subscriptions/fetch-invoices/)
+- [Cancel a subscription](https://razorpay.com/docs/api/payments/subscriptions/cancel-subscription/)

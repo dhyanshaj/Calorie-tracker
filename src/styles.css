@@ -6538,7 +6538,7 @@ body {
     font-size: 11px;
   }
 }
-/* Thirty-day program, saved completion checklist, and one-time lifetime access. */
+/* Thirty-day program, saved completion checklist, and monthly subscription access. */
 .program-section {
   margin: 22px 0 28px;
 }
@@ -6631,7 +6631,7 @@ body {
   padding: 7px 9px;
   white-space: nowrap;
 }
-.access-badge.lifetime {
+.access-badge.paid {
   background: #342a41;
   border-color: #5a4870;
   color: #d0b5ef;
@@ -6714,7 +6714,7 @@ body {
   padding: 7px 0;
   color: var(--text-muted);
 }
-.lifetime-card {
+.subscription-card {
   display: flex;
   align-items: center;
   gap: 16px;
@@ -6724,7 +6724,7 @@ body {
   background: linear-gradient(130deg, #292520, #202126);
   margin-top: 15px;
 }
-.lifetime-symbol {
+.subscription-symbol {
   display: grid;
   place-items: center;
   width: 38px;
@@ -6734,49 +6734,49 @@ body {
   background: #403427;
   flex-shrink: 0;
 }
-.lifetime-card > div:nth-child(2) {
+.subscription-card > div:nth-child(2) {
   flex: 1;
 }
-.lifetime-card .eyebrow {
+.subscription-card .eyebrow {
   color: #bca47e;
   font-size: 7px;
 }
-.lifetime-card h3 {
+.subscription-card h3 {
   font-size: 14px;
   font-weight: 550;
   line-height: 1.6;
   color: #e2d7c9;
   margin-top: 4px;
 }
-.lifetime-card p {
+.subscription-card p {
   font-size: 10px;
   line-height: 1.9;
   color: var(--text-secondary);
   margin-top: 6px;
   max-width: 500px;
 }
-.lifetime-card > div > small {
+.subscription-card > div > small {
   display: block;
   font-size: 9px;
   color: #bcaa91;
   line-height: 1.8;
   margin-top: 6px;
 }
-.lifetime-purchase {
+.subscription-purchase {
   display: flex;
   flex-direction: column;
   gap: 9px;
   align-items: flex-end;
   flex-shrink: 0;
 }
-.lifetime-purchase > strong {
+.subscription-purchase > strong {
   color: var(--accent);
   font-size: 25px;
   letter-spacing: -0.8px;
   font-family: "Manrope Variable", sans-serif;
   font-weight: 550;
 }
-.lifetime-purchase > strong > small {
+.subscription-purchase > strong > small {
   font-size: 9px;
   letter-spacing: 0;
   color: var(--text-muted);
@@ -6784,7 +6784,7 @@ body {
   font-family: "DM Sans Variable", sans-serif;
   font-weight: 400;
 }
-.lifetime-purchase .button {
+.subscription-purchase .button {
   font-size: 10px;
   min-height: 35px;
 }
@@ -6939,10 +6939,10 @@ body {
   .free-plan-start > .button {
     margin-left: 63px;
   }
-  .lifetime-symbol {
+  .subscription-symbol {
     display: none;
   }
-  .lifetime-card {
+  .subscription-card {
     gap: 14px;
   }
   .month-days {
@@ -6957,10 +6957,10 @@ body {
   .access-badge {
     font-size: 8px;
   }
-  .lifetime-purchase {
+  .subscription-purchase {
     max-width: 150px;
   }
-  .lifetime-purchase .button {
+  .subscription-purchase .button {
     font-size: 9px;
     padding: 9px;
   }
@@ -7025,21 +7025,21 @@ body {
   .trial-end {
     font-size: 9px;
   }
-  .lifetime-card {
+  .subscription-card {
     flex-wrap: wrap;
     padding: 19px 17px;
     gap: 14px;
   }
-  .lifetime-card > div:nth-child(2) {
+  .subscription-card > div:nth-child(2) {
     min-width: 200px;
   }
-  .lifetime-card h3 {
+  .subscription-card h3 {
     font-size: 14px;
   }
-  .lifetime-card p {
+  .subscription-card p {
     font-size: 10px;
   }
-  .lifetime-purchase {
+  .subscription-purchase {
     max-width: none;
     width: 100%;
     flex-direction: row;
@@ -7048,15 +7048,15 @@ body {
     justify-content: space-between;
     gap: 10px;
   }
-  .lifetime-purchase > strong {
+  .subscription-purchase > strong {
     font-size: 27px;
   }
-  .lifetime-purchase > strong > small {
+  .subscription-purchase > strong > small {
     display: block;
     margin: 0;
     font-size: 9px;
   }
-  .lifetime-purchase .button {
+  .subscription-purchase .button {
     font-size: 10px;
     padding: 10px;
     min-height: 38px;
@@ -7108,3 +7108,9 @@ body {
     font-size: 11px;
   }
 }
+
+.subscription-card .subscription-dates { font-weight: 600; color: var(--ink); }
+.subscription-cancel { grid-column: 1 / -1; padding: 18px; border-radius: 12px; background: #24252d; border: 1px solid #48414a; }
+.subscription-cancel > p { margin: 0 0 14px; font-size: 13px; line-height: 1.7; color: #d4d2da; }
+.subscription-cancel > div { display: flex; flex-wrap: wrap; gap: 10px; }
+.subscription-cancel button { min-height: 44px; }

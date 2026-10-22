@@ -80,7 +80,7 @@ test("trial starts explicitly once, checklist updates are idempotent, persisted 
   assert.equal(saved.current("owner")!.remainingDays, 30);
   reopened.close();
 });
-test("calendar expiry is enforced on the server and lifetime access keeps historical checklists", () => {
+test("calendar expiry, finite paid periods and historical checklists are enforced", () => {
   const store = new MealStore(":memory:");
   let now = new Date("2026-10-21T10:00:00Z");
   const programs = new PlanPrograms(store.db, () => now);
@@ -97,17 +97,39 @@ test("calendar expiry is enforced on the server and lifetime access keeps histor
   );
   assert.throws(
     () => programs.next("owner", plan),
-    (e: any) => e.code === "LIFETIME_REQUIRED",
+    (e: any) => e.code === "SUBSCRIPTION_REQUIRED",
   );
-  programs.grantLifetime("owner", "pay_fixture");
-  assert.equal(programs.access("owner").status, "lifetime");
+  // An explicit unit-test ledger fixture, not a provider response or live payment.
+  store.db
+    .prepare(
+      "INSERT INTO plan_subscriptions(id,user_id,plan_id,status,created_at) VALUES(?,?,?,?,?)",
+    )
+    .run("sub_fixture", "owner", "plan_fixture", "active", now.toISOString());
+  store.db
+    .prepare(
+      "INSERT INTO subscription_payments(id,subscription_id,invoice_id,period_start,period_end) VALUES(?,?,?,?,?)",
+    )
+    .run(
+      "pay_fixture",
+      "sub_fixture",
+      "inv_fixture",
+      now.getTime() / 1000,
+      new Date("2026-12-20T10:00:00Z").getTime() / 1000,
+    );
+  assert.equal(programs.access("owner").status, "subscribed");
+  assert.equal(programs.access("owner").pricePaise, 49900);
   programs.complete("owner", first.id, 1, true, true);
   programs.next("owner", plan);
   assert.equal(programs.current("owner")!.cycle, 2);
   assert.equal(programs.state("owner").history.length, 2);
   assert.equal(programs.state("owner").history[1].completedCount, 1);
-  now = new Date("2036-10-21T10:00:00Z");
-  assert.equal(programs.access("owner").hasLifetime, true);
+  now = new Date("2026-12-20T10:00:00Z");
+  assert.equal(programs.access("owner").hasPaidPlan, false);
+  assert.equal(programs.access("owner").canTrack, false);
+  assert.throws(
+    () => programs.next("owner", plan),
+    (e: any) => e.code === "SUBSCRIPTION_REQUIRED",
+  );
   store.close();
 });
 test("profile changes preserve completed meals and update pending days and their targets", () => {
@@ -132,171 +154,6 @@ test("profile changes preserve completed meals and update pending days and their
     updated.plan.days[1].targets.kcal,
   );
   assert.equal(updated.completedCount, 1);
-  store.close();
-});
-function providerFixture() {
-  let captured = true,
-    amount = 99900,
-    refunded = 0,
-    calls = 0;
-  const payment = () => ({
-    id: "pay_fixture",
-    order_id: "order_fixture",
-    amount,
-    currency: "INR",
-    status:
-      refunded >= 99900 ? "refunded" : captured ? "captured" : "authorized",
-    captured,
-    amount_refunded: refunded,
-  });
-  const fetcher: typeof fetch = async (url, init) => {
-    const path = String(url);
-    if (path.endsWith("/orders")) {
-      calls++;
-      assert.equal(JSON.parse(String(init!.body)).amount, 99900);
-      return Response.json({
-        id: "order_fixture",
-        amount: 99900,
-        currency: "INR",
-      });
-    }
-    if (path.endsWith("/orders/order_fixture/payments"))
-      return Response.json({ items: [payment()] });
-    if (path.endsWith("/payments/pay_fixture")) return Response.json(payment());
-    throw new Error("Unexpected fixture request");
-  };
-  return {
-    fetcher,
-    calls: () => calls,
-    setCaptured: (value: boolean) => (captured = value),
-    setAmount: (value: number) => (amount = value),
-    setRefunded: (value: number) => (refunded = value),
-  };
-}
-const config = {
-  keyId: "rzp_test_fixture",
-  keySecret: "fixture-secret-not-real",
-  webhookSecret: "fixture-webhook-not-real",
-};
-const verification = () => ({
-  razorpay_order_id: "order_fixture",
-  razorpay_payment_id: "pay_fixture",
-  razorpay_signature: createHmac("sha256", config.keySecret)
-    .update("order_fixture|pay_fixture")
-    .digest("hex"),
-});
-test("payment fulfillment requires ownership, a valid signature, exact INR amount and a captured payment", async () => {
-  const store = new MealStore(":memory:");
-  const programs = new PlanPrograms(store.db);
-  const provider = providerFixture();
-  const billing = new Billing(store.db, programs, config, provider.fetcher);
-  const [order, concurrentOrder] = await Promise.all([
-    billing.createOrder("owner"),
-    billing.createOrder("owner"),
-  ]);
-  assert.equal(concurrentOrder.id, order.id);
-  assert.equal(order.amount, 99900);
-  assert.equal(order.currency, "INR");
-  assert.equal((await billing.createOrder("owner")).id, order.id);
-  assert.equal(provider.calls(), 1);
-  assert.equal(programs.access("owner").hasLifetime, false);
-  await assert.rejects(
-    () => billing.verify("other", verification()),
-    (e: any) => e.code === "ORDER_NOT_FOUND",
-  );
-  await assert.rejects(
-    () =>
-      billing.verify("owner", {
-        ...verification(),
-        razorpay_signature: "0".repeat(64),
-      }),
-    (e: any) => e.code === "INVALID_PAYMENT_SIGNATURE",
-  );
-  provider.setCaptured(false);
-  await assert.rejects(
-    () => billing.verify("owner", verification()),
-    (e: any) => e.code === "PAYMENT_NOT_CAPTURED",
-  );
-  provider.setCaptured(true);
-  provider.setAmount(100);
-  await assert.rejects(
-    () => billing.verify("owner", verification()),
-    (e: any) => e.code === "PAYMENT_NOT_CAPTURED",
-  );
-  assert.equal(programs.access("owner").hasLifetime, false);
-  provider.setAmount(99900);
-  await billing.verify("owner", verification());
-  await billing.verify("owner", verification());
-  assert.equal(programs.access("owner").hasLifetime, true);
-  assert.equal(
-    (
-      store.db
-        .prepare(
-          "SELECT COUNT(*) AS count FROM payment_orders WHERE status='paid'",
-        )
-        .get() as any
-    ).count,
-    1,
-  );
-  await assert.rejects(
-    () => billing.createOrder("owner"),
-    (e: any) => e.code === "ALREADY_LIFETIME",
-  );
-  store.close();
-});
-test("signed webhooks recover missed checkout callbacks, reject tampering, and revoke full refunds", async () => {
-  const store = new MealStore(":memory:");
-  const programs = new PlanPrograms(store.db);
-  const provider = providerFixture();
-  const billing = new Billing(store.db, programs, config, provider.fetcher);
-  await billing.createOrder("owner");
-  const raw = Buffer.from(
-    JSON.stringify({
-      event: "payment.captured",
-      payload: {
-        payment: { entity: { id: "pay_fixture", order_id: "order_fixture" } },
-      },
-    }),
-  );
-  await assert.rejects(
-    () => billing.webhook(raw, "0".repeat(64)),
-    (e: any) => e.code === "INVALID_WEBHOOK_SIGNATURE",
-  );
-  assert.equal(programs.access("owner").hasLifetime, false);
-  const sign = (body: Buffer) =>
-    createHmac("sha256", config.webhookSecret).update(body).digest("hex");
-  await billing.webhook(raw, sign(raw));
-  await billing.webhook(raw, sign(raw));
-  assert.equal(programs.access("owner").hasLifetime, true);
-  provider.setRefunded(99900);
-  const refund = Buffer.from(
-    JSON.stringify({
-      event: "refund.processed",
-      payload: { refund: { entity: { payment_id: "pay_fixture" } } },
-    }),
-  );
-  await billing.webhook(refund, sign(refund));
-  assert.equal(programs.access("owner").hasLifetime, false);
-  await assert.rejects(
-    () => billing.webhook(raw, sign(raw)),
-    (e: any) => e.code === "PAYMENT_NOT_CAPTURED",
-  );
-  store.close();
-});
-test("payment status recovery verifies with the provider and missing configuration never grants access", async () => {
-  const store = new MealStore(":memory:");
-  const programs = new PlanPrograms(store.db);
-  const missing = new Billing(store.db, programs, {});
-  await assert.rejects(
-    () => missing.createOrder("owner"),
-    (e: any) => e.code === "PAYMENTS_NOT_CONFIGURED",
-  );
-  assert.equal(programs.access("owner").hasLifetime, false);
-  const provider = providerFixture();
-  const billing = new Billing(store.db, programs, config, provider.fetcher);
-  await billing.createOrder("owner");
-  await billing.status("owner");
-  assert.equal(programs.access("owner").hasLifetime, true);
   store.close();
 });
 test("program HTTP routes protect accounts, return persisted counts and enforce expired access", async () => {
@@ -372,75 +229,10 @@ test("program HTTP routes protect accounts, return persisted counts and enforce 
       1,
     );
     assert.equal(
-      (await request("/api/billing/orders", "POST", {}, cookie)).response
+      (await request("/api/billing/subscriptions", "POST", {}, cookie)).response
         .status,
       503,
     );
-  } finally {
-    await new Promise<void>((resolve) => server.close(() => resolve()));
-    store.close();
-  }
-});
-
-test("payment HTTP webhook preserves raw bytes, requires its signature and grants an owned lifetime pass", async () => {
-  const store = new MealStore(":memory:");
-  const provider = providerFixture();
-  const app = createApp(store, {
-    visionModel: "unused",
-    payments: config,
-    paymentFetch: provider.fetcher,
-  });
-  const server = app.listen(0, "127.0.0.1");
-  await new Promise<void>((resolve) => server.once("listening", resolve));
-  const base = `http://127.0.0.1:${(server.address() as any).port}`;
-  try {
-    const signup = await fetch(base + "/api/auth/signup", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name: "Payment route test",
-        email: "payment-route@example.com",
-        password: "route-test-password",
-      }),
-    });
-    const cookie = signup.headers.get("set-cookie")!.split(";")[0];
-    const order = await fetch(base + "/api/billing/orders", {
-      method: "POST",
-      headers: { cookie },
-    });
-    assert.equal(order.status, 200);
-    assert.equal(((await order.json()) as any).amount, 99900);
-    const event = JSON.stringify({
-      event: "payment.captured",
-      payload: {
-        payment: { entity: { id: "pay_fixture", order_id: "order_fixture" } },
-      },
-    });
-    const invalid = await fetch(base + "/api/billing/webhook", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-razorpay-signature": "0".repeat(64),
-      },
-      body: event,
-    });
-    assert.equal(invalid.status, 400);
-    const signature = createHmac("sha256", config.webhookSecret)
-      .update(event)
-      .digest("hex");
-    const confirmed = await fetch(base + "/api/billing/webhook", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-razorpay-signature": signature,
-      },
-      body: event,
-    });
-    assert.equal(confirmed.status, 200);
-    const state = await fetch(base + "/api/plan-program", {
-      headers: { cookie },
-    });
-    assert.equal(((await state.json()) as any).access.hasLifetime, true);
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
     store.close();

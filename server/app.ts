@@ -59,6 +59,7 @@ export function createApp(store: MealStore, config: Config) {
     programs,
     config.payments ?? {},
     config.paymentFetch,
+    config.clock,
   );
   app.disable("x-powered-by");
   app.use((req, res, next) => {
@@ -126,7 +127,7 @@ export function createApp(store: MealStore, config: Config) {
     const access = programs.access(user.id);
     if (access.status === "expired")
       return programs.current(user.id)?.plan ?? fresh;
-    if (access.hasLifetime) programs.refreshProfile(user.id, fresh);
+    if (access.hasPaidPlan) programs.refreshProfile(user.id, fresh);
     return fresh;
   }
   app.get("/api/auth/me", (req, res) => {
@@ -221,17 +222,34 @@ export function createApp(store: MealStore, config: Config) {
     standardHeaders: "draft-8",
     legacyHeaders: false,
     handler: (_req, res) =>
-      res
-        .status(429)
-        .json({
-          error: {
-            code: "PAYMENT_RATE_LIMIT",
-            message: "Please wait a minute before checking payment again.",
-          },
-        }),
+      res.status(429).json({
+        error: {
+          code: "PAYMENT_RATE_LIMIT",
+          message: "Please wait a minute before checking payment again.",
+        },
+      }),
   });
-  app.post("/api/billing/orders", paymentLimit, async (_req, res) =>
-    res.json(await billing.createOrder(res.locals.user.id)),
+  app.post("/api/billing/subscriptions", paymentLimit, async (_req, res) => {
+    const user = res.locals.user;
+    if (!user.profile || !buildPlan(user.profile).eligible)
+      throw new AppError(
+        400,
+        "PLAN_UNAVAILABLE",
+        "Automated meal planning is unavailable for this profile. No subscription was created.",
+      );
+    res.json(await billing.createSubscription(user.id));
+  });
+  app.post(
+    "/api/billing/subscriptions/:id/cancel",
+    paymentLimit,
+    async (req, res) => {
+      const id = z
+        .string()
+        .regex(/^sub_[A-Za-z0-9]+$/)
+        .parse(req.params.id);
+      await billing.cancel(res.locals.user.id, id);
+      res.json(programState(res.locals.user.id));
+    },
   );
   app.post("/api/billing/verify", paymentLimit, async (req, res) => {
     await billing.verify(

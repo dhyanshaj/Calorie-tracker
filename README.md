@@ -60,7 +60,7 @@ fixtures do not represent live image recognition.
   Real photo recognition requires the service below. No key means an explicit
   error with a description-only alternative, never fabricated photo analysis.
 
-## 30 days free, then ₹999 once
+## 30 days free, then ₹499 per month
 
 The plan page contains 30 daily menus and a persistent, account-specific checklist.
 Start the free plan explicitly to begin its 30-calendar-day period. Tick or untick
@@ -68,11 +68,19 @@ days you followed; the remaining count updates and survives refresh/sign-in.
 Checklist ticks never create diary entries or change nutrition totals. Completed
 meal snapshots are preserved when profile changes refresh pending days.
 
-After the free period, the old plan is read-only. Lifetime meal planning costs
-**₹999 once**, with no automatic renewal. Razorpay checkout is implemented but
-stays disabled until merchant keys and signed webhooks are configured. Entitlement
-requires a server-verified captured INR 999 payment; a browser success callback
-cannot unlock it. The diary remains accessible. See [payment setup](docs/PAYMENTS.md).
+After the free period, the old plan is read-only. Continued meal planning costs
+**₹499 per month** through an explicitly authorized recurring subscription. The
+trial never charges automatically; subscribe after the full 30-calendar-day free
+period. Cancel renewal in the app and retain access through the verified paid
+month. The diary stays accessible after planning access expires.
+
+Razorpay Subscriptions checkout is implemented but disabled until merchant keys,
+a **₹499 INR, interval 1, monthly** provider plan, and signed webhooks are configured.
+A mandate authorization alone cannot unlock access: a paid subscription invoice
+and its exact captured INR 499 payment must be verified server-side. Failed
+renewals expire at the paid period end; full refunds revoke only the matching
+paid month. Fulfilled legacy lifetime purchases remain honored without recurring
+charges. See [payment setup](docs/PAYMENTS.md).
 
 ## Optional integrations
 

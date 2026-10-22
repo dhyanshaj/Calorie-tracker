@@ -81,18 +81,36 @@ The app uses charcoal `#101115`, raised gray cards `#1b1d23`, off-white text, wa
 
 `GET /api/plan-program` returns the signed-in account’s current snapshot,
 completion day numbers, remaining checklist count, separate free-period expiry,
-and lifetime status. `POST /api/plan-program/start` begins the free period once.
+and paid-period/subscription status. `POST /api/plan-program/start` begins the free period once.
 `PUT /api/plan-program/:id/days/:day` sets a boolean completion state idempotently;
-`POST /api/plan-program/next` is lifetime-only and preserves prior cycle summaries.
+`POST /api/plan-program/next` requires active paid planning access and preserves prior cycle summaries.
 Expiry and ownership are enforced by the server, not browser timestamps. Completed
 day snapshots retain their own targets when pending days change with the profile.
 An expired account cannot generate a fresh plan through the profile endpoint.
 
-`POST /api/billing/orders` fixes the price at INR 999. `POST /api/billing/verify`
-checks an owned order, a HMAC signature and the provider’s captured payment record.
-`POST /api/billing/status` recovers missed callbacks. `POST /api/billing/webhook`
-uses the raw request bytes and a separate signature; it handles captured payments
-and verified full refunds. Grants and refund revocation are idempotent. Checkout
-is disabled until configured, and production rejects test checkout keys.
-The new SQLite tables are additive; existing accounts and meal rows are retained.
-See [PAYMENTS.md](PAYMENTS.md) and [PHOTO-SETUP.md](PHOTO-SETUP.md).
+`POST /api/billing/subscriptions` creates or reuses an account-owned Razorpay
+subscription only after trial expiry. It validates the provider plan: monthly,
+interval 1, quantity 1, INR 49900 paise. `POST /api/billing/verify` checks the
+subscription-specific HMAC (`payment_id|subscription_id`) using the stored owned
+ID. A valid signature/mandate alone grants nothing. Reconciliation fetches the
+provider subscription and paginated invoices, then verifies each relevant paid
+invoice's matching order/payment, captured status, exact amount/currency, and
+finite billing period before writing an immutable payment ledger.
+
+`POST /api/billing/status` recovers missed callbacks. `POST
+/api/billing/subscriptions/:id/cancel` verifies ownership, requests cancellation
+at the paid cycle end (or immediately for an uncharged mandate), and retains all
+verified paid time. `POST /api/billing/webhook` verifies raw bytes with a separate
+secret and handles subscription state/renewals and full-refund revocation.
+Per-account queues serialize provider mutations. Idempotent ledger writes and
+monotonic refund flags prevent replayed events from extending or restoring access.
+Unpaid renewals expire locally at the verified invoice end even during provider
+outages; the food diary is unaffected. Paid billing months are calendar months,
+while the checklist contains 30 days and the free period lasts 30 calendar days.
+
+New subscription/payment tables are additive. Existing profiles, meals, trial
+clocks, completed days, old payment records, and fulfilled legacy lifetime grants
+remain intact. Old one-time order checkout is retired. Production rejects test
+keys for checkout and webhook fulfillment. See [PAYMENTS.md](PAYMENTS.md) and
+[PHOTO-SETUP.md](PHOTO-SETUP.md). Tests use explicit fixtures; no live recurring
+charge, mandate, settlement, cancellation or refund has been verified.
