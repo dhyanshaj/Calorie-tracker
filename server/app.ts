@@ -8,11 +8,17 @@ import { Billing, verificationSchema, type PaymentConfig } from "./billing";
 import { Accounts } from "./auth";
 import { profileSchema } from "../shared/profile";
 import { ageAt, buildPlan } from "./plan";
+import { mealAlternatives } from "./menu";
 import { catalog } from "../shared/catalog";
 import { calculateItem, sumNutrients } from "../shared/nutrition";
 import type { MealItem } from "../shared/types";
 import { MealStore } from "./store";
 import { AppError } from "./errors";
+import { randomUUID } from "node:crypto";
+import { Mailer, type MailConfig } from "./mail";
+import { AccountActions } from "./account-actions";
+import { Library } from "./library";
+import { PhotoUsage } from "./usage";
 import { analyzeMeal } from "./analysis";
 import { resolveFood, searchFoods } from "./usda";
 export type Config = {
@@ -22,6 +28,9 @@ export type Config = {
   payments?: PaymentConfig;
   paymentFetch?: typeof fetch;
   clock?: () => Date;
+  mail?: MailConfig;
+  mailFetch?: typeof fetch;
+  analysis?: typeof analyzeMeal;
 };
 const itemSchema = z.object({
   id: z.string().min(1).max(100),
@@ -49,6 +58,7 @@ const saveSchema = z.object({
   saveToken: z.uuid(),
   version: z.number().int().positive().optional(),
   method: z.enum(["manual", "description", "vision"]).default("manual"),
+  sourceMealId: z.uuid().optional(),
 });
 export function createApp(store: MealStore, config: Config) {
   const app = express();
@@ -61,19 +71,94 @@ export function createApp(store: MealStore, config: Config) {
     config.paymentFetch,
     config.clock,
   );
+  const library = new Library(store.db);
+  const usage = new PhotoUsage(store.db, programs, config.clock);
+  const mail = new Mailer(config.mail ?? {}, config.mailFetch);
+  const accountActions = new AccountActions(
+    store.db,
+    accounts,
+    mail,
+    config.clock,
+  );
+  const stillSignedIn = (id: string) => {
+    if (!accounts.get(id))
+      throw new AppError(
+        401,
+        "AUTH_REQUIRED",
+        "Your account is no longer available. Sign in again.",
+      );
+  };
+  const requireVerified = (user: ReturnType<Accounts["get"]>) => {
+    if (process.env.NODE_ENV === "production" && !user?.emailVerified)
+      throw new AppError(
+        403,
+        "EMAIL_VERIFICATION_REQUIRED",
+        "Verify your email in Account & privacy before using Plus services.",
+      );
+  };
   app.disable("x-powered-by");
+  const hops = Number(process.env.TRUST_PROXY_HOPS ?? 0);
+  if (Number.isInteger(hops) && hops > 0 && hops < 6)
+    app.set("trust proxy", hops);
+  app.use((req, res, next) => {
+    const requestId = randomUUID(),
+      started = Date.now();
+    res.setHeader("X-Request-ID", requestId);
+    if (process.env.NODE_ENV === "production")
+      res.once("finish", () =>
+        console.info(
+          JSON.stringify({
+            requestId,
+            method: req.method,
+            route: req.route?.path ?? "static",
+            status: res.statusCode,
+            durationMs: Date.now() - started,
+          }),
+        ),
+      );
+    next();
+  });
   app.use((req, res, next) => {
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("Referrer-Policy", "same-origin");
     res.setHeader("Cache-Control", "no-store");
+    res.setHeader(
+      "Permissions-Policy",
+      "camera=(self), microphone=(), geolocation=()",
+    );
+    res.setHeader("X-Frame-Options", "DENY");
+    if (process.env.NODE_ENV === "production") {
+      res.setHeader(
+        "Strict-Transport-Security",
+        "max-age=31536000; includeSubDomains",
+      );
+      res.setHeader(
+        "Content-Security-Policy",
+        "default-src 'self'; script-src 'self' https://checkout.razorpay.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://*.razorpay.com; font-src 'self'; connect-src 'self' https://*.razorpay.com; frame-src https://*.razorpay.com; object-src 'none'; base-uri 'self'; form-action 'self' https://*.razorpay.com; frame-ancestors 'none'",
+      );
+    }
     if (["POST", "PUT", "DELETE", "PATCH"].includes(req.method)) {
       const origin = req.get("origin");
+      if (req.get("sec-fetch-site") === "cross-site")
+        return res.status(403).json({
+          error: {
+            code: "ORIGIN_REJECTED",
+            message: "Open the app directly before making changes.",
+          },
+        });
       // Mutations are same-origin. No credentialed cross-origin access is exposed.
-      if (
-        origin &&
-        (!/^https?:\/\//.test(origin) ||
-          new URL(origin).host !== req.get("host"))
-      )
+      let validOrigin = true;
+      if (origin) {
+        try {
+          const parsed = new URL(origin);
+          validOrigin =
+            /^https?:$/.test(parsed.protocol) &&
+            parsed.host === req.get("host");
+        } catch {
+          validOrigin = false;
+        }
+      }
+      if (!validOrigin)
         return res.status(403).json({
           error: {
             code: "ORIGIN_REJECTED",
@@ -83,6 +168,14 @@ export function createApp(store: MealStore, config: Config) {
         });
     }
     next();
+  });
+  app.get("/healthz", (_req, res) => {
+    try {
+      store.db.prepare("SELECT 1").get();
+      res.json({ ok: true });
+    } catch {
+      res.status(503).json({ ok: false });
+    }
   });
   app.post(
     "/api/billing/webhook",
@@ -122,12 +215,17 @@ export function createApp(store: MealStore, config: Config) {
 
   function visiblePlan(user: ReturnType<Accounts["get"]>) {
     if (!user?.profile) return null;
-    const fresh = buildPlan(user.profile);
+    const fresh = buildPlan(
+      user.profile,
+      new Date(),
+      (programs.current(user.id)?.cycle ?? 1) - 1,
+    );
     if (!fresh.eligible) return fresh;
     const access = programs.access(user.id);
     if (access.status === "expired")
       return programs.current(user.id)?.plan ?? fresh;
-    if (access.hasPaidPlan) programs.refreshProfile(user.id, fresh);
+    if (access.hasPaidPlan || access.status === "free")
+      programs.refreshProfile(user.id, fresh);
     return fresh;
   }
   app.get("/api/auth/me", (req, res) => {
@@ -161,25 +259,229 @@ export function createApp(store: MealStore, config: Config) {
     accounts.logout(req, res);
     res.status(204).end();
   });
+  const recoveryLimit = rateLimit({
+    windowMs: 3600000,
+    limit: 10,
+    standardHeaders: "draft-8",
+    legacyHeaders: false,
+    handler: (_req, res) =>
+      res.status(429).json({
+        error: {
+          code: "RECOVERY_LIMIT",
+          message:
+            "Too many account requests. Please wait an hour before trying again.",
+        },
+      }),
+  });
+  app.post("/api/auth/password-request", recoveryLimit, async (req, res) => {
+    const { email } = z.object({ email: z.email().max(254) }).parse(req.body);
+    await accountActions.request(email, "reset");
+    res.json({
+      message:
+        "If this email has an account, a reset link has been sent. Check your inbox.",
+    });
+  });
+  app.post("/api/auth/password-reset", recoveryLimit, async (req, res) => {
+    const { token, password } = z
+      .object({ token: z.string(), password: z.string().min(10).max(128) })
+      .parse(req.body);
+    await accountActions.consume("reset", token, password);
+    res.json({ message: "Password updated. Sign in with your new password." });
+  });
+  app.post("/api/auth/email-verify", recoveryLimit, async (req, res) => {
+    const { token } = z.object({ token: z.string() }).parse(req.body);
+    await accountActions.consume("verify", token);
+    res.json({ message: "Email verified. You can return to your diary." });
+  });
   app.use("/api", accounts.require);
+  app.get("/api/account/settings", (_req, res) =>
+    res.json({
+      emailAvailable: mail.configured,
+      emailVerified: res.locals.user.emailVerified,
+    }),
+  );
+  app.post("/api/account/verify-email", recoveryLimit, async (_req, res) => {
+    await accountActions.request(res.locals.user.email, "verify");
+    res.json({
+      message:
+        "Check your inbox for a verification link. It expires in 24 hours.",
+    });
+  });
+  app.get("/api/account/export", (_req, res) => {
+    res.setHeader(
+      "Content-Disposition",
+      'attachment; filename="platewise-export.json"',
+    );
+    res.json(accountActions.export(res.locals.user.id));
+  });
+  app.post("/api/account/delete", recoveryLimit, async (req, res) => {
+    const { password, confirmation } = z
+      .object({
+        password: z.string().min(1).max(128),
+        confirmation: z.literal("DELETE"),
+      })
+      .parse(req.body);
+    const id = res.locals.user.id;
+    await accountActions.reauthenticate(id, password);
+    store.db
+      .prepare("UPDATE users SET deleting_at=? WHERE id=?")
+      .run(new Date().toISOString(), id);
+    try {
+      await billing.cancelAll(id);
+      accountActions.remove(id);
+      accounts.logout(req, res);
+      res.status(204).end();
+    } catch (error) {
+      store.db.prepare("UPDATE users SET deleting_at=NULL WHERE id=?").run(id);
+      throw error;
+    }
+  });
+  app.get("/api/library", (_req, res) =>
+    res.json(library.state(res.locals.user.id)),
+  );
+  app.put("/api/favourites/meals/:id", (req, res) => {
+    const id = z.uuid().parse(req.params.id),
+      { favourite } = z.object({ favourite: z.boolean() }).parse(req.body),
+      userId = res.locals.user.id;
+    const meal = store.get(userId, id) ?? library.meal(userId, id);
+    if (!meal)
+      throw new AppError(
+        404,
+        "NOT_FOUND",
+        "This meal is not available in your diary.",
+      );
+    library.set(userId, "meal", id, favourite ? meal : null);
+    res.json(library.state(userId));
+  });
+  app.put("/api/favourites/foods/:id", async (req, res) => {
+    const id = z.string().max(100).parse(req.params.id),
+      { favourite } = z.object({ favourite: z.boolean() }).parse(req.body),
+      userId = res.locals.user.id;
+    const saved =
+      library.state(userId).favouriteFoods.find((f) => f.id === id) ??
+      library.state(userId).recentFoods.find((f) => f.id === id);
+    const food = favourite
+      ? (saved ?? (await resolveFood(id, config.usdaKey)))
+      : null;
+    if (favourite && !food)
+      throw new AppError(404, "UNKNOWN_FOOD", "Choose a supported food.");
+    stillSignedIn(userId);
+    library.set(userId, "food", id, food ?? null);
+    res.json(library.state(userId));
+  });
+  app.get("/api/photo-usage", (_req, res) =>
+    res.json(usage.state(res.locals.user.id)),
+  );
+  app.post("/api/plus/start-trial", (_req, res) => {
+    requireVerified(res.locals.user);
+    programs.startTrial(res.locals.user.id);
+    res.json(programState(res.locals.user.id));
+  });
   app.put("/api/profile", (req, res) => {
     const profile = profileSchema.parse(req.body);
     const age = ageAt(profile.birthDate);
     if (age < 0 || age > 110)
       throw new AppError(400, "INVALID_AGE", "Enter a valid date of birth.");
     const user = accounts.saveProfile(res.locals.user.id, profile);
-    const plan = buildPlan(profile);
+    const plan = buildPlan(
+      profile,
+      new Date(),
+      (programs.current(user.id)?.cycle ?? 1) - 1,
+    );
     if (programs.access(user.id).status !== "expired")
       programs.refreshProfile(user.id, plan);
     res.json({ user, plan: visiblePlan(user) });
   });
   const programState = (userId: string) => ({
     ...programs.state(userId, billing.configured),
+    access: {
+      ...programs.access(userId, billing.available("monthly")),
+      annualCheckoutAvailable: billing.available("annual"),
+    },
     paymentMode: billing.mode,
   });
   app.get("/api/plan-program", (_req, res) =>
     res.json(programState(res.locals.user.id)),
   );
+  app.get("/api/plan-program/:id/days/:day/alternatives", (req, res) => {
+    const id = z.uuid().parse(req.params.id),
+      day = z.coerce.number().int().min(1).max(30).parse(req.params.day),
+      slot = z.coerce.number().int().min(0).max(3).parse(req.query.slot),
+      user = res.locals.user;
+    const program = programs.current(user.id);
+    if (!program || program.id !== id)
+      throw new AppError(404, "PROGRAM_NOT_FOUND", "Open your current plan.");
+    if (
+      !user.profile ||
+      !buildPlan(user.profile).eligible ||
+      !programs.access(user.id).canTrack
+    )
+      throw new AppError(
+        403,
+        "PLAN_UNAVAILABLE",
+        "Active planning access and an eligible profile are required.",
+      );
+    res.json({
+      revision: program.revision,
+      alternatives: mealAlternatives(
+        user.profile,
+        program.plan.days[day - 1],
+        slot,
+      ),
+    });
+  });
+  app.put("/api/plan-program/:id/days/:day/swap", (req, res) => {
+    const id = z.uuid().parse(req.params.id),
+      day = z.coerce.number().int().min(1).max(30).parse(req.params.day),
+      { slot, option, revision } = z
+        .object({
+          slot: z.number().int().min(0).max(3),
+          option: z.number().int().min(0).max(7),
+          revision: z.number().int().positive(),
+        })
+        .parse(req.body),
+      user = res.locals.user;
+    const program = programs.current(user.id);
+    if (!program || program.id !== id)
+      throw new AppError(404, "PROGRAM_NOT_FOUND", "Open your current plan.");
+    if (program.revision !== revision)
+      throw new AppError(
+        409,
+        "STALE_PLAN",
+        "This plan changed. Reload choices before swapping.",
+      );
+    if (program.completedDays.includes(day))
+      throw new AppError(
+        409,
+        "DAY_COMPLETE",
+        "Undo the day’s completion before changing its meals.",
+      );
+    if (!programs.access(user.id).canTrack)
+      throw new AppError(
+        403,
+        "PLAN_EXPIRED",
+        "Your planning access has ended.",
+      );
+    if (!user.profile || !buildPlan(user.profile).eligible)
+      throw new AppError(
+        403,
+        "PLAN_UNAVAILABLE",
+        "Automated planning is paused for this profile.",
+      );
+    const alternative = mealAlternatives(
+      user.profile,
+      program.plan.days[day - 1],
+      slot,
+    ).find((a) => a.option === option);
+    if (!alternative)
+      throw new AppError(
+        400,
+        "INVALID_SWAP",
+        "Choose an available alternative.",
+      );
+    programs.swap(user.id, id, day, slot, alternative.meal, revision);
+    res.json(programState(user.id));
+  });
   app.post("/api/plan-program/start", (_req, res) => {
     const user = res.locals.user;
     if (!user.profile)
@@ -213,7 +515,14 @@ export function createApp(store: MealStore, config: Config) {
         "PROFILE_REQUIRED",
         "Complete your profile first.",
       );
-    programs.next(user.id, buildPlan(user.profile));
+    programs.next(
+      user.id,
+      buildPlan(
+        user.profile,
+        new Date(),
+        programs.current(user.id)?.cycle ?? 0,
+      ),
+    );
     res.json(programState(user.id));
   });
   const paymentLimit = rateLimit({
@@ -229,15 +538,13 @@ export function createApp(store: MealStore, config: Config) {
         },
       }),
   });
-  app.post("/api/billing/subscriptions", paymentLimit, async (_req, res) => {
+  app.post("/api/billing/subscriptions", paymentLimit, async (req, res) => {
     const user = res.locals.user;
-    if (!user.profile || !buildPlan(user.profile).eligible)
-      throw new AppError(
-        400,
-        "PLAN_UNAVAILABLE",
-        "Automated meal planning is unavailable for this profile. No subscription was created.",
-      );
-    res.json(await billing.createSubscription(user.id));
+    requireVerified(user);
+    const { cadence } = z
+      .object({ cadence: z.enum(["monthly", "annual"]).default("monthly") })
+      .parse(req.body ?? {});
+    res.json(await billing.createSubscription(user.id, cadence));
   });
   app.post(
     "/api/billing/subscriptions/:id/cancel",
@@ -269,6 +576,7 @@ export function createApp(store: MealStore, config: Config) {
       visionAvailable: !!config.visionKey,
       usdaAvailable: !!config.usdaKey,
       storage: "sqlite",
+      photoAllowance: usage.state(res.locals.user.id),
       model: config.visionModel,
     }),
   );
@@ -333,12 +641,27 @@ export function createApp(store: MealStore, config: Config) {
         }
       }
       // No uploaded images are written to disk or stored with saved meals.
-      res.json(
-        await analyzeMeal(description, image, {
-          key: config.visionKey,
-          model: config.visionModel,
-        }),
-      );
+      let reservation: string | undefined;
+      try {
+        if (image && config.visionKey) {
+          requireVerified(res.locals.user);
+          reservation = usage.reserve(res.locals.user.id);
+        }
+        const result = await (config.analysis ?? analyzeMeal)(
+          description,
+          image,
+          {
+            key: image ? config.visionKey : undefined,
+            model: config.visionModel,
+          },
+        );
+        stillSignedIn(res.locals.user.id);
+        if (reservation) usage.finish(reservation, result.items.length > 0);
+        res.json(result);
+      } catch (error) {
+        if (reservation) usage.finish(reservation, false);
+        throw error;
+      }
     },
   );
   async function normalize(
@@ -385,7 +708,10 @@ export function createApp(store: MealStore, config: Config) {
     const items = await normalize(
       input.items,
       input.mealId
-        ? store.get(res.locals.user.id, input.mealId)?.items
+        ? (
+            store.get(res.locals.user.id, input.mealId) ??
+            library.meal(res.locals.user.id, input.mealId)
+          )?.items
         : undefined,
     );
     res.json({
@@ -417,7 +743,16 @@ export function createApp(store: MealStore, config: Config) {
   });
   app.post("/api/meals", async (req, res) => {
     const input = saveSchema.parse(req.body);
-    const items = await normalize(input.items);
+    const items = await normalize(
+      input.items,
+      input.sourceMealId
+        ? (
+            store.get(res.locals.user.id, input.sourceMealId) ??
+            library.meal(res.locals.user.id, input.sourceMealId)
+          )?.items
+        : undefined,
+    );
+    stillSignedIn(res.locals.user.id);
     const meal = store.save(res.locals.user.id, {
       ...input,
       items,
@@ -439,6 +774,7 @@ export function createApp(store: MealStore, config: Config) {
         "This meal no longer exists. Refresh the diary.",
       );
     const items = await normalize(input.items, prior.items);
+    stillSignedIn(res.locals.user.id);
     const meal = store.save(
       res.locals.user.id,
       {
@@ -452,6 +788,8 @@ export function createApp(store: MealStore, config: Config) {
       id,
       input.version,
     );
+    if (library.meal(res.locals.user.id, id))
+      library.set(res.locals.user.id, "meal", id, meal);
     res.json(meal);
   });
   app.delete("/api/meals/:id", (req, res) => {

@@ -1,11 +1,16 @@
 import type { DailyPlan } from "./profile";
 export const PLAN_LENGTH = 30;
-export const MONTHLY_PRICE_PAISE = 49900;
+export const MONTHLY_PRICE_PAISE = 19900;
+export const ANNUAL_PRICE_PAISE = 149900;
+export const PHOTO_LIMIT = 100;
+export type BillingCadence = "monthly" | "annual";
 export type PlanSubscription = {
   id: string;
   status: string;
   cancelAtPeriodEnd: boolean;
   nextChargeAt: string | null;
+  cadence?: BillingCadence;
+  amountPaise?: number;
 };
 export type PlanAccess = {
   status: "not_started" | "free" | "expired" | "subscribed" | "legacy_lifetime";
@@ -18,10 +23,12 @@ export type PlanAccess = {
   subscription: PlanSubscription | null;
   canTrack: boolean;
   checkoutAvailable: boolean;
+  annualCheckoutAvailable?: boolean;
   pricePaise: number;
   currency: "INR";
 };
 export type PlanProgram = {
+  revision?: number;
   id: string;
   cycle: number;
   startedAt: string;

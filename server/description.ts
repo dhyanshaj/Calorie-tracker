@@ -79,11 +79,11 @@ export function parseDescription(description: string): {
     }
     // A quantity must be adjacent to this food through a short list of portion words.
     const modifiers =
-      "(?:(?:medium|small|large|bone-in|boneless|skinless|cooked|boiled|grilled|baked|whole|extra|additional|added|pieces?|slices?|cups?|grams?|g|kg|ml|tsp|tbsp|teaspoons?|tablespoons?|of|a|an)\\s*)*";
+      "(?:(?:medium|small|large|bone-in|boneless|skinless|cooked|boiled|grilled|baked|whole|extra|additional|added|servings?|pieces?|slices?|cups?|grams?|g|kg|ml|tsp|tbsp|teaspoons?|tablespoons?|of|a|an)\\s*)*";
     const before = prefix.match(new RegExp(`\\b(${num})\\s*(${modifiers})$`));
     const after = tail.match(
       new RegExp(
-        `^\\s*(?:[:=-]\\s*)?(${num})\\s*(g(?:rams?)?|kg|cups?|pieces?|slices?|ml|tsp|tbsp)\\b`,
+        `^\\s*(?:[:=-]\\s*)?(${num})\\s*(g(?:rams?)?|kg|servings?|cups?|pieces?|slices?|ml|tsp|tbsp)\\b`,
       ),
     );
     const consumed = prefix.match(
@@ -93,7 +93,7 @@ export function parseDescription(description: string): {
     );
     const q = consumed?.[1] ?? before?.[1] ?? after?.[1];
     const unitText = before?.[2] ?? after?.[2] ?? "";
-    if (["chicken-curry", "dal"].includes(m.food.id)) {
+    if (foodById.has(`${m.food.id}-no-oil`)) {
       const explicitOil =
         /\b(?:no|without)\s+(?:added\s+)?oil\b/.test(text) ||
         (matches.some((f) => f.food.id === "oil") &&
@@ -105,7 +105,7 @@ export function parseDescription(description: string): {
       quantity *= number(consumed[2]);
     let portion = m.food.portions[0];
     const unitMatch = unitText.match(
-      /\b(kg|g|grams?|ml|cups?|slices?|pieces?|tsp|tbsp|teaspoons?|tablespoons?)\b/,
+      /\b(kg|g|grams?|ml|servings?|cups?|slices?|pieces?|tsp|tbsp|teaspoons?|tablespoons?)\b/,
     );
     const unitRaw = unitMatch?.[1];
     const unit =
@@ -165,7 +165,7 @@ export function parseDescription(description: string): {
   remainder = remainder
     .replace(new RegExp(`\\b${num}\\b`, "g"), " ")
     .replace(
-      /\b(i|we|ate|eat|had|have|finished|my|meal|was|is|the|and|with|without|of|some|a|an|little|bit|medium|small|large|bone|in|boneless|skinless|pieces?|slices?|cups?|grams?|g|kg|ml|tsp|tbsp|teaspoons?|tablespoons?|cooked|boiled|grilled|baked|raw|plain|extra|additional|added|no|for|lunch|dinner|breakfast|gravy|actually|only|about|approximately|around|all|served|portion|on|side)\b/g,
+      /\b(i|we|ate|eat|had|have|finished|my|meal|was|is|the|and|with|without|of|some|a|an|little|bit|medium|small|large|bone|in|boneless|skinless|servings?|pieces?|slices?|cups?|grams?|g|kg|ml|tsp|tbsp|teaspoons?|tablespoons?|cooked|boiled|grilled|baked|raw|plain|extra|additional|added|no|for|lunch|dinner|breakfast|gravy|actually|only|about|approximately|around|all|served|portion|on|side)\b/g,
       " ",
     );
   const unmatched = remainder.split(/[^a-z]+/).filter((s) => s.length > 2);

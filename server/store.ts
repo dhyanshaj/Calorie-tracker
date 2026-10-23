@@ -1,6 +1,6 @@
 import { DatabaseSync } from "node:sqlite";
 import { randomUUID } from "node:crypto";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, chmodSync, existsSync } from "node:fs";
 import { dirname } from "node:path";
 import type { Meal } from "../shared/types";
 import { AppError } from "./errors";
@@ -11,11 +11,16 @@ export type MealDraft = Omit<
 export class MealStore {
   db: DatabaseSync;
   constructor(path: string) {
-    if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true });
+    if (path !== ":memory:")
+      mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
     this.db = new DatabaseSync(path);
+    if (path !== ":memory:") chmodSync(path, 0o600);
     this.db.exec(
       `PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS meals(id TEXT PRIMARY KEY,eaten_at TEXT NOT NULL,save_token TEXT NOT NULL UNIQUE,version INTEGER NOT NULL,body TEXT NOT NULL,user_id TEXT NOT NULL); CREATE INDEX IF NOT EXISTS meal_time ON meals(eaten_at);`,
     );
+    if (path !== ":memory:")
+      for (const file of [path + "-wal", path + "-shm"])
+        if (existsSync(file)) chmodSync(file, 0o600);
     const columns = this.db.prepare("PRAGMA table_info(meals)").all() as {
       name: string;
     }[];

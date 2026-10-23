@@ -38,7 +38,14 @@ test("account, onboarding, plan, photo fallback, corrections and diary lifecycle
   await expect(
     page.getByRole("heading", { name: "Your daily meal plan", exact: true }),
   ).toBeVisible();
+  await expect(page.getByRole("tab")).toHaveCount(7);
+  await page
+    .getByRole("button", { name: "Show all 30 days", exact: true })
+    .click();
   await expect(page.getByRole("tab")).toHaveCount(30);
+  await page
+    .getByRole("button", { name: "Show one week", exact: true })
+    .click();
   await expect(
     page.getByRole("checkbox", { name: "Completed Day 1", exact: true }),
   ).toBeDisabled();
@@ -68,10 +75,10 @@ test("account, onboarding, plan, photo fallback, corrections and diary lifecycle
     page.locator(".program-stats > div").nth(1).locator("strong"),
   ).toHaveText("30");
   await expect(
-    page.getByRole("button", { name: "Subscribe for ₹499/month" }),
+    page.getByRole("button", { name: "Subscribe for ₹199/month" }),
   ).toBeDisabled();
   await expect(page.locator(".subscription-card")).toContainText(
-    "₹499 per month",
+    "₹199 per month",
   );
   await expect(page.locator(".subscription-card")).toContainText(
     "No automatic charge at trial end",

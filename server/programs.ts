@@ -9,6 +9,8 @@ import {
   type ProgramState,
 } from "../shared/program";
 import { AppError } from "./errors";
+import type { PlannedMeal } from "../shared/profile";
+import { sumNutrients } from "../shared/nutrition";
 const dayMs = 86400000;
 type Membership = {
   trial_started_at: string | null;
@@ -27,6 +29,27 @@ export class PlanPrograms {
    CREATE INDEX IF NOT EXISTS subscriptions_user ON plan_subscriptions(user_id,created_at);
    CREATE TABLE IF NOT EXISTS subscription_payments(id TEXT PRIMARY KEY,subscription_id TEXT NOT NULL,invoice_id TEXT NOT NULL UNIQUE,period_start INTEGER NOT NULL,period_end INTEGER NOT NULL,refunded INTEGER NOT NULL DEFAULT 0);
    CREATE INDEX IF NOT EXISTS subscription_periods ON subscription_payments(subscription_id,period_end);`);
+    this.migrateBillingColumns();
+  }
+  private migrateBillingColumns() {
+    const columns = this.db
+      .prepare("PRAGMA table_info(plan_subscriptions)")
+      .all() as { name: string }[];
+    if (!columns.some((c) => c.name === "amount"))
+      this.db.exec(
+        "ALTER TABLE plan_subscriptions ADD COLUMN amount INTEGER NOT NULL DEFAULT 49900",
+      );
+    if (!columns.some((c) => c.name === "cadence"))
+      this.db.exec(
+        "ALTER TABLE plan_subscriptions ADD COLUMN cadence TEXT NOT NULL DEFAULT 'monthly'",
+      );
+    const planColumns = this.db
+      .prepare("PRAGMA table_info(plan_programs)")
+      .all() as { name: string }[];
+    if (!planColumns.some((c) => c.name === "revision"))
+      this.db.exec(
+        "ALTER TABLE plan_programs ADD COLUMN revision INTEGER NOT NULL DEFAULT 1",
+      );
   }
   access(userId: string, checkoutAvailable = false): PlanAccess {
     const member = this.db
@@ -49,11 +72,13 @@ export class PlanPrograms {
     const subscribed = !!paidUntil && now < new Date(paidUntil).getTime();
     const subscription = this.db
       .prepare(
-        "SELECT id,status,cancel_at_period_end,charge_at FROM plan_subscriptions WHERE user_id=? ORDER BY created_at DESC,rowid DESC LIMIT 1",
+        "SELECT id,status,cancel_at_period_end,charge_at,cadence,amount FROM plan_subscriptions WHERE user_id=? ORDER BY created_at DESC,rowid DESC LIMIT 1",
       )
       .get(userId) as
       | {
           id: string;
+          cadence: "monthly" | "annual";
+          amount: number;
           status: string;
           cancel_at_period_end: number;
           charge_at: number | null;
@@ -81,6 +106,8 @@ export class PlanPrograms {
       subscription: subscription
         ? {
             id: subscription.id,
+            cadence: subscription.cadence,
+            amountPaise: subscription.amount,
             status: subscription.status,
             cancelAtPeriodEnd: !!subscription.cancel_at_period_end,
             nextChargeAt:
@@ -105,7 +132,13 @@ export class PlanPrograms {
         "SELECT * FROM plan_programs WHERE user_id=? ORDER BY cycle DESC LIMIT 1",
       )
       .get(userId) as
-      | { id: string; cycle: number; started_at: string; plan: string }
+      | {
+          id: string;
+          cycle: number;
+          started_at: string;
+          plan: string;
+          revision: number;
+        }
       | undefined;
     if (!row) return null;
     const completedDays = (
@@ -117,6 +150,7 @@ export class PlanPrograms {
     ).map((r) => r.day);
     return {
       id: row.id,
+      revision: row.revision,
       cycle: row.cycle,
       startedAt: row.started_at,
       plan: JSON.parse(row.plan),
@@ -149,6 +183,12 @@ export class PlanPrograms {
   }
   start(userId: string, plan: DailyPlan): void {
     if (this.current(userId)) return; // Starting again never resets the trial clock or progress.
+    if (this.access(userId).status === "expired")
+      throw new AppError(
+        403,
+        "PLAN_EXPIRED",
+        "Your trial has ended. Choose Plus to start another plan.",
+      );
     if (!plan.eligible || plan.days.length !== PLAN_LENGTH)
       throw new AppError(
         400,
@@ -174,6 +214,13 @@ export class PlanPrograms {
       throw error;
     }
   }
+  startTrial(userId: string) {
+    this.db
+      .prepare(
+        "INSERT INTO memberships(user_id,trial_started_at) VALUES(?,?) ON CONFLICT(user_id) DO UPDATE SET trial_started_at=COALESCE(memberships.trial_started_at,excluded.trial_started_at)",
+      )
+      .run(userId, this.clock().toISOString());
+  }
   complete(
     userId: string,
     programId: string,
@@ -198,7 +245,7 @@ export class PlanPrograms {
       throw new AppError(
         403,
         "PLAN_EXPIRED",
-        "Your planning access has ended. Your past records remain available. Continue meal planning for ₹499 per month.",
+        "Your planning access has ended. Your past records remain available. Continue meal planning for ₹199 per month.",
       );
     if (!Number.isInteger(day) || day < 1 || day > PLAN_LENGTH)
       throw new AppError(400, "INVALID_DAY", "Choose a day from 1 to 30.");
@@ -216,6 +263,11 @@ export class PlanPrograms {
   refreshProfile(userId: string, fresh: DailyPlan): void {
     const current = this.current(userId);
     if (!current || !fresh.eligible) return;
+    if (
+      fresh.sourceProfile &&
+      current.plan.sourceProfile === fresh.sourceProfile
+    )
+      return;
     const completed = new Set(current.completedDays);
     const days = fresh.days.map((day, index) =>
       completed.has(index + 1) ? (current.plan.days[index] ?? day) : day,
@@ -228,15 +280,60 @@ export class PlanPrograms {
       menuTotals: days[0].totals,
     };
     this.db
-      .prepare("UPDATE plan_programs SET plan=? WHERE id=? AND user_id=?")
+      .prepare(
+        "UPDATE plan_programs SET plan=?,revision=revision+1 WHERE id=? AND user_id=?",
+      )
       .run(JSON.stringify(updated), current.id, userId);
+  }
+  swap(
+    userId: string,
+    id: string,
+    day: number,
+    slot: number,
+    meal: PlannedMeal,
+    revision: number,
+  ) {
+    const program = this.current(userId);
+    if (!program || program.id !== id)
+      throw new AppError(404, "PROGRAM_NOT_FOUND", "Reload your current plan.");
+    if (!this.access(userId).canTrack)
+      throw new AppError(403, "PLAN_EXPIRED", "Planning access has expired.");
+    if (program.completedDays.includes(day))
+      throw new AppError(
+        409,
+        "DAY_COMPLETE",
+        "Undo the day’s completion before changing its meals.",
+      );
+    const next = program.plan.days[day - 1];
+    next.menu[slot] = meal;
+    next.totals = sumNutrients(next.menu.map((m) => ({ nutrients: m.totals })));
+    next.closeToTargets =
+      Math.abs(next.totals.kcal - next.targets.kcal) <=
+        next.targets.kcal * 0.1 &&
+      Math.abs(next.totals.protein - next.targets.protein) <=
+        next.targets.protein * 0.15 &&
+      Math.abs(next.totals.fat - next.targets.fat) <= next.targets.fat * 0.15;
+    program.plan.week = program.plan.days.slice(0, 7);
+    program.plan.menu = program.plan.days[0].menu;
+    program.plan.menuTotals = program.plan.days[0].totals;
+    const changed = this.db
+      .prepare(
+        "UPDATE plan_programs SET plan=?,revision=revision+1 WHERE id=? AND user_id=? AND revision=?",
+      )
+      .run(JSON.stringify(program.plan), id, userId, revision);
+    if (!changed.changes)
+      throw new AppError(
+        409,
+        "STALE_PLAN",
+        "This plan changed in another tab. Reload before swapping.",
+      );
   }
   next(userId: string, plan: DailyPlan): void {
     if (!this.access(userId).hasPaidPlan)
       throw new AppError(
         403,
         "SUBSCRIPTION_REQUIRED",
-        "Starting another 30-day plan requires an active ₹499/month subscription.",
+        "Starting another 30-day plan requires an active Plus subscription.",
       );
     if (!plan.eligible)
       throw new AppError(

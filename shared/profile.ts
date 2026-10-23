@@ -94,6 +94,11 @@ export const profileSchema = z.object({
   diet: z.enum(["balanced", "vegetarian", "vegan"]),
   allergies: z.array(z.enum(allergies)).max(7),
   needsClinicalGuidance: z.boolean(),
+  cuisine: z.enum(["indian", "mediterranean", "international"]).optional(),
+  budget: z.enum(["everyday", "flexible"]).optional(),
+  cookingMinutes: z
+    .union([z.literal(15), z.literal(30), z.literal(45)])
+    .optional(),
 });
 export type Profile = z.infer<typeof profileSchema>;
 export type Account = {
@@ -101,8 +106,10 @@ export type Account = {
   name: string;
   email: string;
   profile: Profile | null;
+  emailVerified?: boolean;
 };
 export type MenuItem = {
+  ingredients?: { key: string; name: string; gramsPer100: number }[];
   foodId: string;
   name: string;
   grams: number;
@@ -124,6 +131,7 @@ export type MealPlanDay = {
   closeToTargets: boolean;
 };
 export type DailyPlan = {
+  sourceProfile?: string;
   eligible: boolean;
   targets: Nutrients | null;
   maintenanceKcal: number | null;

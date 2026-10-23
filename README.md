@@ -60,7 +60,7 @@ fixtures do not represent live image recognition.
   Real photo recognition requires the service below. No key means an explicit
   error with a description-only alternative, never fabricated photo analysis.
 
-## 30 days free, then ₹499 per month
+## Free tracking, with optional Plus
 
 The plan page contains 30 daily menus and a persistent, account-specific checklist.
 Start the free plan explicitly to begin its 30-calendar-day period. Tick or untick
@@ -68,19 +68,42 @@ days you followed; the remaining count updates and survives refresh/sign-in.
 Checklist ticks never create diary entries or change nutrition totals. Completed
 meal snapshots are preserved when profile changes refresh pending days.
 
-After the free period, the old plan is read-only. Continued meal planning costs
-**₹499 per month** through an explicitly authorized recurring subscription. The
-trial never charges automatically; subscribe after the full 30-calendar-day free
-period. Cancel renewal in the app and retain access through the verified paid
-month. The diary stays accessible after planning access expires.
+Basic manual/description tracking, diary totals, favourites and repeated meals stay
+**free**. Try Plus for **30 calendar days**, with no card and no automatic trial-end
+charge. Afterward choose **₹199/month** or **₹1,499 upfront per year** (about
+₹125/month). Plus adds 30-day meal plans, meal swaps, weekly shopping lists, and
+**100 successful photo analyses per billing month**. The trial has 100 in total;
+annual subscriptions also reset monthly rather than granting a full year at once.
 
-Razorpay Subscriptions checkout is implemented but disabled until merchant keys,
-a **₹499 INR, interval 1, monthly** provider plan, and signed webhooks are configured.
-A mandate authorization alone cannot unlock access: a paid subscription invoice
-and its exact captured INR 499 payment must be verified server-side. Failed
-renewals expire at the paid period end; full refunds revoke only the matching
-paid month. Fulfilled legacy lifetime purchases remain honored without recurring
-charges. See [payment setup](docs/PAYMENTS.md).
+Use the plan page or **Plus membership** to manage access and renewal. Cancelling
+renewal retains the verified paid period. Failed renewals expire locally. The diary
+remains accessible. Razorpay verifies exact owned paid invoices and captured
+payments, not just a successful mandate callback. Existing fulfilled lifetime
+purchases and existing subscription prices are preserved on upgrade; no one is
+silently enrolled or switched to a new mandate. See [payment setup](docs/PAYMENTS.md).
+
+## Less setup, more useful daily tools
+
+- **Start tracking first** skips the full profile until you want a plan. The guided
+  profile retains important health/preference questions and an optional barrier step.
+- Recent meals/foods, searchable favourites, and repeat meals open editable estimates;
+  repeats still require explicit confirmation and cannot double-count a retried save.
+- Planner preferences include Indian, Mediterranean or mixed menus, everyday/flexible
+  budgets and 15/30/45-minute active preparation. Recipes use real USDA ingredient
+  records and documented yields. Pre-cooked grains/beans are assumed for quick meals.
+- View one week at a time, expand all 30 days, swap an unticked day's meal with
+  recalculated totals, and download a weekly ingredient list. Completed snapshots
+  remain frozen; concurrent swaps reject stale versions.
+- **Account & privacy** supports email verification, private JSON export and
+  password-confirmed account deletion. Real verification/reset email uses Resend;
+  without email configuration, the app shows an honest setup error. Reset links are
+  hashed at rest, expire after 15 minutes, are single-use and revoke old sessions.
+  Production Plus operations require verified email.
+
+See [launch and email setup](docs/LAUNCH.md) for HTTPS hosting, monitoring,
+account deletion/retention, and backup/restore instructions. A non-root Docker image,
+Caddy/Compose example and CI checks are included. Provider delivery, real payments,
+and real-photo accuracy still require configuration and live validation.
 
 ## Optional integrations
 
@@ -122,7 +145,7 @@ allowed network access; local tests alone cannot validate their accuracy.
 
 ## Nutrition sources and assumptions
 
-The bundled data contains **25 actual USDA SR28 records**, extracted from a
+The bundled data contains **44 actual USDA SR28 records**, extracted from a
 pinned copy of the published database. It is an intentionally small historical
 reference, not a comprehensive live nutrition database. See
 [data/SOURCES.md](data/SOURCES.md) for IDs, provenance, and recipe formulas.
@@ -177,12 +200,11 @@ Before public deployment:
 - Configure trusted reverse-proxy behavior and shared rate-limit/session/storage
   infrastructure if scaling beyond this single-process SQLite app. No proxy
   headers are trusted by default.
-- Add email verification, a verified password-recovery flow, account deletion,
-  and operational monitoring before offering general public account service.
-  Those email services are deliberately not simulated here.
+- Configure the implemented verification/password-reset email service, validate
+  recovery/deletion, and connect host monitoring before offering public accounts.
 - The backend requires a Node server; this is not a static-only deployment.
 
-No deployment or email delivery is included. Existing pre-account diary entries
+No public deployment or live email delivery has been performed. Existing pre-account diary entries
 in an upgraded database are preserved under a private legacy owner; they are
 never reassigned to a newly registered user automatically.
 
@@ -195,3 +217,14 @@ app implements its own Express API, SQLite persistence, and provider
 integrations; it does not claim to use MyFitnessPal's backend or nutrition data.
 
 See [docs/architecture.md](docs/architecture.md) for API behavior and validation.
+
+## Operations and validation
+
+`npm run backup` creates a private verified online SQLite snapshot.
+`npm run restore:check -- /path/to/backup.sqlite` tests a temporary restored copy
+without altering the live diary. Schedule and encrypt off-site backups on your host.
+
+`npm run benchmark:photos -- /path/to/private-manifest.json` runs a real, paid
+photo benchmark only when you supply consented photos, measured comparison values
+and a working key. See [photo validation](docs/PHOTO-VALIDATION.md). No fixture
+result is presented as real vision accuracy.

@@ -1,10 +1,10 @@
-import { foodById } from "../shared/catalog";
+import { foodById, recipeMetadata } from "../shared/catalog";
 import { emptyNutrients, sumNutrients } from "../shared/nutrition";
 import type { MealPlanDay, PlannedMeal, Profile } from "../shared/profile";
 import { PLAN_LENGTH } from "../shared/program";
 import type { Nutrients } from "../shared/types";
 
-type Serving = [id: string, grams: number, min: number, max: number];
+import { mealOptions, type Serving } from "./menu-options";
 const allergens: Record<string, Profile["allergies"][number][]> = {
   milk: ["Milk"],
   yogurt: ["Milk"],
@@ -14,6 +14,9 @@ const allergens: Record<string, Profile["allergies"][number][]> = {
   tofu: ["Soy"],
   "peanut-butter": ["Peanuts"],
   almonds: ["Tree nuts"],
+  cashews: ["Tree nuts"],
+  peanuts: ["Peanuts"],
+  "greek-yogurt": ["Milk"],
   roti: ["Wheat / gluten"],
   bread: ["Wheat / gluten"],
   oats: ["Wheat / gluten"],
@@ -231,8 +234,18 @@ const shortNames: Record<string, string> = {
 };
 function substitute(serving: Serving, profile: Profile): Serving | null {
   const allowed = (id: string) =>
-    !allergens[id]?.some((a) => profile.allergies.includes(a));
+    ![...(allergens[id] ?? []), ...(recipeMetadata[id]?.allergens ?? [])].some(
+      (a) => profile.allergies.includes(a as any),
+    );
   let [id, grams, min, max] = serving;
+  const recipe = recipeMetadata[id];
+  if (
+    recipe &&
+    (!allowed(id) ||
+      (profile.diet === "vegan" && recipe.diet !== "vegan") ||
+      (profile.diet === "vegetarian" && recipe.diet === "balanced"))
+  )
+    return null;
   if (
     profile.diet !== "balanced" &&
     ["chicken", "chicken-curry", "salmon"].includes(id)
@@ -241,7 +254,7 @@ function substitute(serving: Serving, profile: Profile): Serving | null {
   if (profile.diet === "vegan" && id === "egg") id = "tofu";
   if (
     (profile.diet === "vegan" || !allowed(id)) &&
-    ["milk", "yogurt"].includes(id)
+    ["milk", "yogurt", "greek-yogurt"].includes(id)
   )
     return null;
   if (!allowed(id)) {
@@ -253,16 +266,20 @@ function substitute(serving: Serving, profile: Profile): Serving | null {
       grams = 160;
       min = 100;
       max = 300;
-    } else if (["almonds", "peanut-butter"].includes(id)) {
-      id = "avocado";
-      grams = 70;
-      min = 30;
-      max = 150;
+    } else if (
+      ["almonds", "peanut-butter", "peanuts", "cashews"].includes(id)
+    ) {
+      id = "chickpeas";
+      grams = 100;
+      min = 60;
+      max = 200;
     } else return null;
   }
   return allowed(id) ? [id, grams, min, max] : null;
 }
 function dishTitle(slot: string, ids: string[]) {
+  const featured = ids.find((id) => recipeMetadata[id]);
+  if (featured) return foodById.get(featured)!.name;
   if (slot === "Breakfast") {
     if (ids.includes("oats")) return "Warm oats, fruit & toppings";
     if (ids.includes("bread")) return "Toast & breakfast sides";
@@ -272,7 +289,7 @@ function dishTitle(slot: string, ids: string[]) {
   if (slot === "Snack")
     return ids
       .slice(0, 3)
-      .map((id) => shortNames[id])
+      .map((id) => shortNames[id] ?? foodById.get(id)!.name)
       .join(" · ");
   if (ids.includes("chicken-curry"))
     return `${ids.includes("roti") ? "Roti" : "Rice"} & chicken curry`;
@@ -289,6 +306,79 @@ function dishTitle(slot: string, ids: string[]) {
 }
 function preparation(ids: string[]) {
   const steps: string[] = [];
+  const methods: Record<string, string[]> = {
+    chole: [
+      "Warm the measured oil, tomato and onion to make a sauce. Add fully cooked, drained chickpeas and spices; simmer with a little water. Weigh the finished serving.",
+    ],
+    rajma: [
+      "Use fully cooked kidney beans or drained canned beans, never raw or undercooked beans. Simmer them in the measured tomato, onion and oil sauce; weigh the finished portion.",
+    ],
+    khichdi: [
+      "Combine cooked rice and cooked moong with softened carrot and peas. Warm with the measured oil and enough water for your preferred texture. Weigh the edible portion after simmering.",
+    ],
+    "veg-pulao": [
+      "Soften the vegetables and onion in the measured oil, then fold in cooked rice. Cover briefly to warm through. Do not add unlisted ghee.",
+    ],
+    "egg-bhurji": [
+      "Soften tomato and onion in the measured oil, add egg and stir until fully set. The nutrition reference uses cooked egg; weigh your finished edible serving.",
+    ],
+    "besan-chilla": [
+      "Mix besan, chopped tomato/onion, spices and water into a pourable batter. Spread on a hot pan using only the measured oil. Cook both sides until the centre is fully cooked; weigh the finished chilla.",
+    ],
+    "moong-chilla": [
+      "Soak dry moong until soft, drain and grind into a batter before the active cooking session. Add tomato/onion and water, spread on a hot pan with the measured oil, and cook both sides thoroughly.",
+    ],
+    upma: [
+      "Dry-toast semolina briefly. Soften onion and vegetables in the measured oil, add hot water and semolina while stirring, then cook until swollen and soft. Weigh after cooking.",
+    ],
+    "mung-chaat": [
+      "Cool fully cooked mung, then toss with chopped tomato and cucumber. Add spices as desired; the reference has no added oil or sweet chutney.",
+    ],
+    raita: [
+      "Stir chopped cucumber and tomato into plain yogurt. Season as desired without adding sugar or oil. Keep chilled until serving.",
+    ],
+    "palak-tofu": [
+      "Warm tomato and cooked spinach with the measured oil, fold in tofu and heat through. This recipe uses tofu, not paneer; butter or cream would need separate logging.",
+    ],
+    "aloo-gobi": [
+      "Combine cooked potato and cauliflower with tomato, spices and the measured oil. Warm gently until tender; weigh the cooked serving before eating.",
+    ],
+    "mixed-sabzi": [
+      "Warm cooked cauliflower, carrots and peas in tomato and the measured oil. Season and heat through without extra butter or oil.",
+    ],
+    sambar: [
+      "Simmer cooked lentils, carrot, onion and tomato with water and the measured oil. Add your spices; this is a simplified reference recipe, so log substantial extras separately.",
+    ],
+    paratha: [
+      "Knead the measured whole-wheat flour with water, rest briefly and roll. Cook both sides on a hot pan using only the measured oil, then weigh the finished bread.",
+    ],
+    "aloo-paratha": [
+      "Make dough with the measured flour and water. Fill with cooked mashed potato, roll gently and cook both sides using the measured oil. Extra ghee is not included.",
+    ],
+    "curd-rice": [
+      "Mix safely cooled cooked rice with plain yogurt and cucumber. Keep refrigerated until serving; do not add unlisted tempering oil.",
+    ],
+    "tandoori-chicken": [
+      "Marinate chicken with yogurt and spices, then grill or bake thoroughly (74°C internal temperature). Exclude bones and skin and weigh the cooked edible chicken; include only the measured oil.",
+    ],
+    "fruit-chaat": [
+      "Wash and cut the fruit, removing peels, pits and cores. Weigh edible pieces and combine without sugar, syrup or cream.",
+    ],
+    hummus: [
+      "Blend fully cooked chickpeas with the measured oil and water until smooth. This reference has no tahini; log tahini or other additions separately.",
+    ],
+    "quinoa-bowl": [
+      "Combine cooked quinoa and fully cooked chickpeas with cucumber. Dress with only the measured oil and weigh the finished bowl.",
+    ],
+    "oat-yogurt-bowl": [
+      "Cool cooked oats, mix with plain nonfat Greek yogurt and sliced banana, and refrigerate until serving. Sweeteners or nut toppings are separate.",
+    ],
+  };
+  for (const id of ids) if (methods[id]) steps.push(...methods[id]);
+  for (const id of ids.filter((id) => recipeMetadata[id]))
+    steps.push(
+      `Prepare ${foodById.get(id)!.name.toLowerCase()} using its reference ingredients (visible in the food details). Weigh the finished portion; baseline oil is already counted. Active preparation assumes pre-cooked grains/beans; soaking and batch cooking take extra time.`,
+    );
   if (ids.includes("oats"))
     steps.push(
       "Cook oats in water, then weigh the cooked portion. Add the listed fruit and toppings.",
@@ -332,18 +422,39 @@ function buildDay(
   profile: Profile,
   targets: Nutrients,
   index: number,
+  seed = 0,
+  swap?: { slot: number; option: number; fixed: PlannedMeal[] },
 ): MealPlanDay {
   const round = Math.floor(index / 7);
-  const entries = slots.flatMap((_, slot) =>
-    templates[(index + round * (slot + 1)) % templates.length][slot].flatMap(
-      (s) => {
-        const selected = substitute(s, profile);
-        if (!selected) return [];
-        const [id, grams, min, max] = selected;
-        return [{ slot, id, grams, min, max, n: foodById.get(id)!.per100 }];
-      },
-    ),
-  );
+  const entries = slots.flatMap((_, slot) => {
+    if (swap && slot !== swap.slot)
+      return swap.fixed[slot].items.map((item) => ({
+        slot,
+        id: item.foodId,
+        grams: item.grams,
+        min: item.grams,
+        max: item.grams,
+        n: foodById.get(item.foodId)!.per100,
+      }));
+    const pool = mealOptions(
+      profile,
+      slot,
+      templates.map((t) => t[slot]),
+    );
+    const option =
+      swap?.slot === slot
+        ? swap.option
+        : (index * (slot === 2 ? 3 : 1) +
+            round * (slot + 1) +
+            seed * (slot + 2)) %
+          pool.length;
+    return pool[option].flatMap((s) => {
+      const selected = substitute(s, profile);
+      if (!selected) return [];
+      const [id, grams, min, max] = selected;
+      return [{ slot, id, grams, min, max, n: foodById.get(id)!.per100 }];
+    });
+  });
   // Merge substitutions that resolve to the same ingredient in the same meal.
   for (let i = entries.length - 1; i >= 0; i--) {
     const e = entries[i];
@@ -409,6 +520,7 @@ function buildDay(
       .map((e) => ({
         foodId: e.id,
         name: foodById.get(e.id)!.name,
+        ingredients: foodById.get(e.id)!.ingredients,
         grams: e.grams,
         portionLabel: portionLabel(e.id, e.grams),
         nutrients: {
@@ -449,8 +561,41 @@ export function buildWeekMenu(
 export function buildMonthMenu(
   profile: Profile,
   targets: Nutrients,
+  seed = 0,
 ): MealPlanDay[] {
   return Array.from({ length: PLAN_LENGTH }, (_, index) =>
-    buildDay(profile, targets, index),
+    buildDay(profile, targets, index, seed),
   );
+}
+
+export function mealAlternatives(
+  profile: Profile,
+  day: MealPlanDay,
+  slot: number,
+) {
+  const pool = mealOptions(
+    profile,
+    slot,
+    templates.map((t) => t[slot]),
+  );
+  return pool
+    .slice(0, 8)
+    .map((_, option) => {
+      const next = buildDay(profile, day.targets, 0, 0, {
+        slot,
+        option,
+        fixed: day.menu,
+      });
+      return {
+        option,
+        meal: next.menu[slot],
+        dayTotals: next.totals,
+        closeToTargets: next.closeToTargets,
+      };
+    })
+    .filter(
+      (alt) =>
+        alt.meal.items.map((i) => i.foodId).join() !==
+        day.menu[slot].items.map((i) => i.foodId).join(),
+    );
 }

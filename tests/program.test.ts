@@ -117,7 +117,7 @@ test("calendar expiry, finite paid periods and historical checklists are enforce
       new Date("2026-12-20T10:00:00Z").getTime() / 1000,
     );
   assert.equal(programs.access("owner").status, "subscribed");
-  assert.equal(programs.access("owner").pricePaise, 49900);
+  assert.equal(programs.access("owner").pricePaise, 19900);
   programs.complete("owner", first.id, 1, true, true);
   programs.next("owner", plan);
   assert.equal(programs.current("owner")!.cycle, 2);

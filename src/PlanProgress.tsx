@@ -10,7 +10,13 @@ import {
   Sparkles,
 } from "lucide-react";
 import type { Account } from "../shared/profile";
-import type { CheckoutSubscription, ProgramState } from "../shared/program";
+import {
+  MONTHLY_PRICE_PAISE,
+  ANNUAL_PRICE_PAISE,
+  type BillingCadence,
+  type CheckoutSubscription,
+  type ProgramState,
+} from "../shared/program";
 import { api } from "./api";
 type CheckoutResponse = {
   razorpay_subscription_id: string;
@@ -55,6 +61,7 @@ function loadCheckout() {
 }
 export function PlanProgress({
   user,
+  membershipOnly = false,
   state,
   loading,
   busy,
@@ -65,6 +72,7 @@ export function PlanProgress({
   onState,
 }: {
   user: Account;
+  membershipOnly?: boolean;
   state: ProgramState | null;
   loading: boolean;
   busy: boolean;
@@ -78,10 +86,26 @@ export function PlanProgress({
     [paymentError, setPaymentError] = useState(""),
     [paymentNotice, setPaymentNotice] = useState(""),
     [confirmCancel, setConfirmCancel] = useState(false);
+  const [cadence, setCadence] = useState<BillingCadence>("monthly");
   const access = state?.access,
     program = state?.program;
   const paid = access?.hasPaidPlan;
   const subscription = access?.subscription;
+  const selectedCadence =
+    subscription &&
+    !["cancelled", "completed", "expired"].includes(subscription.status)
+      ? (subscription.cadence ?? "monthly")
+      : cadence;
+  const currentAmount =
+    (subscription &&
+    !["cancelled", "completed", "expired"].includes(subscription.status)
+      ? subscription.amountPaise
+      : undefined) ??
+    (selectedCadence === "annual" ? ANNUAL_PRICE_PAISE : MONTHLY_PRICE_PAISE);
+  const checkoutAvailable =
+    selectedCadence === "annual"
+      ? access?.annualCheckoutAvailable
+      : access?.checkoutAvailable;
   const ended =
     !!subscription &&
     ["cancelled", "completed", "expired"].includes(subscription.status);
@@ -121,7 +145,7 @@ export function PlanProgress({
     }
   }
   async function buy() {
-    if (paying || !access?.checkoutAvailable || !maySubscribe) return;
+    if (paying || !checkoutAvailable || !maySubscribe) return;
     setPaying(true);
     setPaymentError("");
     setPaymentNotice("");
@@ -130,6 +154,7 @@ export function PlanProgress({
         "/api/billing/subscriptions",
         {
           method: "POST",
+          body: JSON.stringify({ cadence: selectedCadence }),
         },
       );
       onState(await api<ProgramState>("/api/plan-program"));
@@ -152,8 +177,8 @@ export function PlanProgress({
             onState(confirmed);
             setPaymentNotice(
               confirmed.access.hasPaidPlan
-                ? "Your ₹499/month plan is active. It renews monthly unless you cancel renewal."
-                : "Authorization received. Planning activates after the first ₹499 monthly payment is confirmed. Use Check subscription status shortly.",
+                ? "Your Plus plan is active. It renews at your selected interval unless you cancel renewal."
+                : "Authorization received. Planning activates after the first full subscription payment is confirmed. Use Check subscription status shortly.",
             );
           } catch (error) {
             setPaymentError(
@@ -226,6 +251,23 @@ export function PlanProgress({
             Reload checklist <RotateCcw size={13} />
           </button>
         </div>
+      ) : membershipOnly && access?.status !== "not_started" ? (
+        <div className="membership-status">
+          <h3>
+            {paid
+              ? "Your Plus membership"
+              : access?.status === "free"
+                ? `${access.freeDaysRemaining} free access days left`
+                : "Choose how you’d like to continue"}
+          </h3>
+          <p>
+            {access?.status === "free"
+              ? `Your trial ends ${new Date(access.trialEndsAt!).toLocaleString()}. No automatic charge at trial end.`
+              : paid
+                ? "Your meal plans and monthly photo allowance are ready."
+                : "Your diary and manual tracking stay free. Plus adds meal plans and photo analysis."}
+          </p>
+        </div>
       ) : !program ? (
         <div className="free-plan-start">
           <div className="program-start-icon">
@@ -234,12 +276,14 @@ export function PlanProgress({
           <div>
             <span className="eyebrow">YOUR FIRST 30 DAYS, ON US</span>
             <h3>
-              {paid ? "Start your 30-day plan" : "Start your free 30-day plan"}
+              {paid
+                ? "Start your 30-day plan"
+                : "Start your free 30-day Plus trial"}
             </h3>
             <p>
               {paid
                 ? "Your paid meal planning is active. Start a plan to save your daily checklist."
-                : "Your 30-calendar-day free period begins when you press Start. No payment details needed. Afterward, choose ₹499/month meal planning. You are not charged automatically when the free period ends."}
+                : "Your 30-calendar-day free period begins when you press Start. No payment details needed. Afterward, choose Plus for ₹199/month or ₹1,499/year. You are not charged automatically when the free period ends."}
             </p>
           </div>
           <button
@@ -374,18 +418,19 @@ export function PlanProgress({
             <span className="eyebrow">
               {renewalOff
                 ? "RENEWAL CANCELLED"
-                : "MONTHLY MEMBERSHIP · CANCEL RENEWAL ANYTIME"}
+                : "PLUS MEMBERSHIP · CANCEL RENEWAL ANYTIME"}
             </span>
             <h3>
               {paid
-                ? "Your monthly meal-planning membership"
+                ? "Your Plus membership"
                 : access?.status === "expired"
                   ? "Continue meal planning"
                   : "Keep planning after your free month"}
             </h3>
             <p>
-              ₹499 per month for meal plans and checklists. Once you subscribe,
-              billing renews monthly unless you cancel renewal. Your saved diary
+              Plus includes meal plans, swaps, shopping lists and 100 successful
+              photo analyses per month. Once you subscribe, billing renews at
+              your chosen interval unless you cancel renewal. Your saved diary
               remains available when planning access ends.
             </p>
             {paidUntil && (
@@ -429,12 +474,14 @@ export function PlanProgress({
                 charge at trial end.
               </small>
             )}
-            {state.paymentMode === "test" && access?.checkoutAvailable && (
-              <small>
-                Test checkout only. No real money is charged in this mode.
-              </small>
-            )}
-            {!access?.checkoutAvailable && (
+            {state.paymentMode === "test" &&
+              (access?.checkoutAvailable ||
+                access?.annualCheckoutAvailable) && (
+                <small>
+                  Test checkout only. No real money is charged in this mode.
+                </small>
+              )}
+            {!checkoutAvailable && (
               <small>
                 Payments are not enabled yet. The app owner needs to finish
                 Razorpay Subscriptions setup.
@@ -442,16 +489,40 @@ export function PlanProgress({
             )}
           </div>
           <div className="subscription-purchase">
+            {!paid && (!subscription || ended) && (
+              <div
+                className="billing-options"
+                role="group"
+                aria-label="Billing interval"
+              >
+                <button
+                  aria-pressed={cadence === "monthly"}
+                  onClick={() => setCadence("monthly")}
+                >
+                  Monthly
+                </button>
+                <button
+                  aria-pressed={cadence === "annual"}
+                  onClick={() => setCadence("annual")}
+                >
+                  Yearly · save 37%
+                </button>
+              </div>
+            )}
+            {selectedCadence === "annual" && (
+              <small>₹1,499 upfront per year · about ₹125/month</small>
+            )}
             <strong>
-              ₹499<small>per month</small>
+              ₹{(currentAmount / 100).toLocaleString("en-IN")}{" "}
+              <small>
+                {selectedCadence === "annual" ? "billed per year" : "per month"}
+              </small>
             </strong>
             {!paid &&
               (!subscription || ended || subscription.status === "created") && (
                 <button
                   className="button button-primary"
-                  disabled={
-                    !access?.checkoutAvailable || paying || !maySubscribe
-                  }
+                  disabled={!checkoutAvailable || paying || !maySubscribe}
                   onClick={() => void buy()}
                 >
                   {paying ? (
@@ -461,7 +532,9 @@ export function PlanProgress({
                       <CreditCard size={15} />
                       {subscription?.status === "created"
                         ? "Continue subscription setup"
-                        : "Subscribe for ₹499/month"}
+                        : selectedCadence === "annual"
+                          ? "Subscribe for ₹1,499/year"
+                          : "Subscribe for ₹199/month"}
                     </>
                   )}
                 </button>
@@ -469,7 +542,11 @@ export function PlanProgress({
             {subscription && (
               <button
                 className="text-button payment-status"
-                disabled={!access?.checkoutAvailable || paying}
+                disabled={
+                  !(
+                    access?.checkoutAvailable || access?.annualCheckoutAvailable
+                  ) || paying
+                }
                 onClick={() => void checkPayment()}
               >
                 Check subscription status
@@ -478,7 +555,12 @@ export function PlanProgress({
             {canCancel && !confirmCancel && (
               <button
                 className="text-button"
-                disabled={paying || !access?.checkoutAvailable}
+                disabled={
+                  paying ||
+                  !(
+                    access?.checkoutAvailable || access?.annualCheckoutAvailable
+                  )
+                }
                 onClick={() => setConfirmCancel(true)}
               >
                 Cancel renewal

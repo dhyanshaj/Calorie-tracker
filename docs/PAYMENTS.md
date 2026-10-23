@@ -1,4 +1,4 @@
-# 30 calendar days free, then ₹499 per month
+# Free tracking and Plus subscriptions
 
 ## Customer terms implemented
 
@@ -7,11 +7,11 @@
   **Start my free plan**. Server timestamps determine expiry. Refreshing,
   signing out, or unticking days never restarts the free period.
 - No payment details during the trial and no automatic charge when it ends.
-  After expiry, the user may explicitly authorize **₹499 INR per month**.
-- A subscribed user is billed every calendar month by Razorpay until renewal
+  After expiry, the user may explicitly authorize **₹199 INR per month** or **₹1,499 INR upfront per year**.
+- A subscribed user is billed at their selected monthly or yearly interval by Razorpay until renewal
   is cancelled or the provider ends the subscription. A monthly billing period
   is not necessarily 30 days. Razorpay requires a finite cycle count; this
-  integration uses its documented maximum of 1,200 monthly cycles (100 years).
+  integration uses 1,200 monthly cycles or 100 yearly cycles (up to 100 years).
 - **Cancel renewal** is available on the plan page, with a confirmation step.
   Paid access continues through the verified paid period. Uncharged mandates
   are cancelled immediately. Cancellation does not automatically request a refund.
@@ -22,23 +22,31 @@
 - Subscribers can start another 30-day plan after completing the current
   checklist or reaching its 30-day end. Older checklist summaries remain saved.
   Profile edits refresh pending days and retain completed meal/target snapshots.
-- The old ₹999 lifetime offer is retired for new purchases. Any already fulfilled
-  legacy lifetime purchases remain honored, without adding recurring charges.
+- The old ₹999 lifetime and ₹499/month offers are retired for new purchases. Any already fulfilled
+  legacy lifetime purchases remain honored, without adding recurring charges. Existing ₹499 subscriptions keep their original verified price and do not silently change mandates. To move to a new option, cancel the prior renewal and authorize a new subscription after paid access ends.
 
 ## Configure Razorpay Subscriptions
 
 Create a merchant account at https://dashboard.razorpay.com/signup. Complete its
 business/bank activation and recurring-payment requirements. Use test mode first.
 
-Create a provider **Plan** with these exact settings:
+Create two separate provider **Plans** with these exact settings:
 
-| Setting        | Value              |
-| -------------- | ------------------ |
-| Billing period | Monthly            |
-| Interval       | 1                  |
-| Amount         | ₹499 = 49900 paise |
-| Currency       | INR                |
-| Quantity       | 1                  |
+| Setting        | Monthly            | Annual                  |
+| -------------- | ------------------ | ----------------------- |
+| Billing period | Monthly            | Yearly                  |
+| Interval       | 1                  | 1                       |
+| Amount         | ₹199 = 19900 paise | ₹1,499 = 149900 paise   |
+| Currency       | INR                | INR                     |
+| Quantity       | 1                  | 1                       |
+| Configuration  | RAZORPAY_PLAN_ID   | RAZORPAY_ANNUAL_PLAN_ID |
+
+Basic manual/description tracking and saved diary access stay free. Plus includes
+planning, swaps, weekly shopping lists and 100 successful photo analyses per
+billing month. The trial includes 100 in total. Annual access still resets photo
+allowance monthly; it does not grant 1,200 analyses upfront. Provider failures
+and empty/non-food results do not consume a successful-analysis slot. See
+[photo validation and allowance behavior](PHOTO-VALIDATION.md).
 
 Do not attach add-ons, discounts, or tax rules that change the captured total.
 The server rejects a different amount, currency, period, interval or quantity.
@@ -52,7 +60,8 @@ the deployment host’s encrypted server environment/secret manager:
 RAZORPAY_KEY_ID=YOUR_KEY_ID
 RAZORPAY_KEY_SECRET=YOUR_KEY_SECRET
 RAZORPAY_WEBHOOK_SECRET=YOUR_WEBHOOK_SECRET
-RAZORPAY_PLAN_ID=YOUR_MONTHLY_PLAN_ID
+RAZORPAY_PLAN_ID=YOUR_199_MONTHLY_PLAN_ID
+RAZORPAY_ANNUAL_PLAN_ID=YOUR_1499_YEARLY_PLAN_ID
 ```
 
 Use a plan ID from the same merchant account and test/live mode as the keys.
@@ -86,10 +95,10 @@ concurrent requests cannot create duplicate subscriptions in this single-process
 deployment. The Checkout signature uses `payment_id|subscription_id` with the
 stored owned subscription ID. Authorization alone never unlocks a paid month.
 
-The server fetches the provider subscription, its exact monthly plan, paginated
+The server fetches the provider subscription, its exact selected plan, paginated
 invoices and matching captured payments. An invoice must be paid in full, belong
 to that subscription, match its payment/order, have a finite billing period,
-and total exactly INR 499. Only verified invoice periods grant time-limited
+and total exactly INR 199 monthly or INR 1499 yearly (or the original stored price for a legacy subscription). Only verified invoice periods grant time-limited
 access. Renewal webhooks extend access to the new paid period. **Check subscription
 status** recovers missed callbacks without requesting another subscription.
 
@@ -110,17 +119,18 @@ expiry, owned checkout, bad signatures, wrong price/plan/quantity, captured vers
 authorized payments, renewals, cancellation, full refunds, retries and account
 isolation. They do not make actual provider charges.
 
-With a configured merchant account, validate authorization and the first ₹499
-charge, a second renewal, declined/retried payments, pre-debit communications,
+With a configured merchant account, validate authorization and the first ₹199 monthly or ₹1,499 annual
+charge, a renewal at each interval, declined/retried payments, pre-debit communications,
 signed webhook delivery, cancellation and refunds. Confirm supported recurring
 payment methods, any customer mandate limits, and settlement in Razorpay.
 
 Host the backend and persistent database on a server you control. Customer-owned
 copies of this open-source local app cannot enforce a paid hosted service.
-Complete email verification/recovery, account deletion, privacy/terms/refund
-policies, database backups and monitoring before a general public launch.
-Define any photo-analysis allowance explicitly: a ₹499 meal-planning subscription
-does not silently promise unlimited paid third-party AI processing.
+Configure the implemented email verification/recovery, validate account deletion,
+finalize privacy/terms/refund policies, and schedule database backups and monitoring
+before a general public launch. See [launch guide](LAUNCH.md).
+The published allowance is 100 successful photo analyses per month. Monitor real
+service costs and validate the price with a beta before promising broader usage.
 
 Provider references inspected for this integration:
 

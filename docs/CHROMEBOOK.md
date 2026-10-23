@@ -81,7 +81,20 @@ Your Chromebook copy does not update automatically when code changes on GitHub.
 8. Refresh `localhost:3000` in Chrome. Open **My nutrition plan** to see the 30-day meal planner. Press **Start my free plan** when you are ready to begin the 30-calendar-day free period and save checklist progress.
 
 Photo recognition is optional and has separate provider billing; see
-[photo setup](PHOTO-SETUP.md). Accepting ₹499 monthly subscriptions
+[photo setup](PHOTO-SETUP.md). Accepting ₹199 monthly or ₹1,499 annual subscriptions
 also needs merchant configuration and a hosted server; see
 [payment setup](PAYMENTS.md). You do not need either integration to try local
 description estimates, meal planning, and the diary.
+
+## New tools
+
+Use **Start tracking first** if you want to log before completing your profile.
+Your shortcuts appear after you save meals. Star meals/foods to keep them in
+**Favourites**, or repeat a meal and confirm its new date/time before saving.
+
+The plan now opens one week at a time. Use **Show all 30 days**, **Swap this meal**,
+and the weekly shopping download when helpful. **Account & privacy** has data
+export, verification and deletion; **Plus membership** explains both billing options.
+
+Email and paid services need the app owner's setup. Follow [launch/email setup](LAUNCH.md),
+[photo setup](PHOTO-SETUP.md) and [payment setup](PAYMENTS.md). Never paste keys into chat.

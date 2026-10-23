@@ -1,3 +1,6 @@
+import { AccountCenter } from "./AccountCenter";
+import { QuickLibrary } from "./QuickLibrary";
+import { Membership, PhotoAllowance } from "./Membership";
 import {
   useEffect,
   useRef,
@@ -32,6 +35,7 @@ import {
   Search,
   ShieldCheck,
   Sparkles,
+  Star,
   Target,
   Trash2,
   Upload,
@@ -167,7 +171,11 @@ export default function Tracker({
   onLogout: () => void;
   initialView?: "overview" | "plan";
 }) {
-  const [view, setView] = useState<"overview" | "diary" | "plan">(initialView);
+  const [view, setView] = useState<
+    "overview" | "diary" | "plan" | "plus" | "account"
+  >(initialView);
+  const [sourceMealId, setSourceMealId] = useState<string | undefined>();
+  const [usageRevision, setUsageRevision] = useState(0);
   const [status, setStatus] = useState<Status | null>(null);
   const [foods, setFoods] = useState<Food[]>([]);
   const [setupError, setSetupError] = useState("");
@@ -305,6 +313,7 @@ export default function Tracker({
     if (!busy) selectPhoto(e.dataTransfer.files[0]);
   }
   function newDraft() {
+    setSourceMealId(undefined);
     setEditing(null);
     setAnalysis(null);
     setTitle("");
@@ -353,6 +362,7 @@ export default function Tracker({
         body: form,
       });
       setAnalysis(result);
+      setUsageRevision((v) => v + 1);
       setDirty(false);
       setAcknowledged(false);
       setAddOpen(!result.items.length);
@@ -463,7 +473,9 @@ export default function Tracker({
         method: "POST",
         body: JSON.stringify({
           items: inputItems(analysis.items),
-          ...(editing ? { mealId: editing.id } : {}),
+          ...((editing?.id ?? sourceMealId)
+            ? { mealId: editing?.id ?? sourceMealId }
+            : {}),
         }),
       });
       setAnalysis({
@@ -512,6 +524,7 @@ export default function Tracker({
         items: inputItems(analysis.items),
         saveToken,
         version: editing?.version,
+        sourceMealId,
         method: analysis.method,
       };
       const saved = await api<Meal>(
@@ -535,6 +548,7 @@ export default function Tracker({
     }
   }
   function editMeal(meal: Meal) {
+    setSourceMealId(undefined);
     setEditing(meal);
     setAnalysis(meal);
     setPhoto(null);
@@ -582,7 +596,9 @@ export default function Tracker({
       setDeleteBusy(false);
     }
   }
-  function navigate(target: "overview" | "diary" | "plan") {
+  function navigate(
+    target: "overview" | "diary" | "plan" | "plus" | "account",
+  ) {
     setView(target);
     setTimeout(() => {
       (target === "diary"
@@ -603,6 +619,64 @@ export default function Tracker({
         )
   ).slice(0, 30);
 
+  function repeatMeal(meal: Meal) {
+    newDraft();
+    setSourceMealId(meal.id);
+    setAnalysis({
+      ...meal,
+      items: meal.items.map((i) => ({ ...i, id: crypto.randomUUID() })),
+    });
+    setTitle(meal.title);
+    setDescription(meal.description);
+    setView("overview");
+    window.setTimeout(
+      () =>
+        resultRef.current?.scrollIntoView({
+          behavior: "smooth",
+          block: "start",
+        }),
+      80,
+    );
+  }
+  function shortcutFood(food: Food) {
+    if (analysis) {
+      addFood(food);
+      return;
+    }
+    newDraft();
+    const portion = food.portions[0];
+    const item = calculateItem(
+      {
+        id: crypto.randomUUID(),
+        foodId: food.id,
+        quantity: 1,
+        unit: portion.unit,
+        gramsPerUnit: portion.grams,
+      },
+      food,
+    );
+    setFoods((list) =>
+      list.some((f) => f.id === food.id) ? list : [...list, food],
+    );
+    setAnalysis({
+      items: [item],
+      totals: item.nutrients,
+      assumptions: [food.assumption],
+      questions: [],
+      incomplete: false,
+      method: "manual",
+    });
+    setTitle(food.name);
+    setView("overview");
+    window.setTimeout(
+      () =>
+        resultRef.current?.scrollIntoView({
+          behavior: "smooth",
+          block: "start",
+        }),
+      80,
+    );
+  }
   function planMeal(
     items: DailyPlan["menu"][number]["items"],
     mealTitle: string,
@@ -686,7 +760,21 @@ export default function Tracker({
             <Target size={19} />
             My nutrition plan
           </button>
-          <button className="nav-item" onClick={() => setAbout(true)}>
+          <button
+            className={`nav-item ${view === "plus" ? "selected" : ""}`}
+            onClick={() => navigate("plus")}
+          >
+            <Sparkles size={19} />
+            Plus membership
+          </button>
+          <button
+            className={`nav-item ${view === "account" ? "selected" : ""}`}
+            onClick={() => navigate("account")}
+          >
+            <ShieldCheck size={19} />
+            Account & privacy
+          </button>
+          <button className="nav-item nav-about" onClick={() => setAbout(true)}>
             <CircleHelp size={19} />
             About your estimates
           </button>
@@ -729,7 +817,11 @@ export default function Tracker({
                 ? "Overview"
                 : view === "diary"
                   ? "Food diary"
-                  : "My nutrition plan"}
+                  : view === "plus"
+                    ? "Plus membership"
+                    : view === "account"
+                      ? "Account & privacy"
+                      : "My nutrition plan"}
             </strong>
           </div>
           <div className="topbar-right">
@@ -747,51 +839,57 @@ export default function Tracker({
           </div>
         </header>
         <main>
-          <div className="page-heading">
-            <div>
-              <div className="eyebrow">
-                <span /> A LITTLE MORE MINDFUL, A LITTLE LESS GUESSWORK
-              </div>
-              <h1>
-                {view === "overview" ? (
-                  <>
-                    Know what’s on
-                    <br className="mobile-break" /> your plate<span>.</span>
-                  </>
-                ) : view === "diary" ? (
-                  "Your meals, at a glance."
-                ) : (
-                  "A plan with you in mind."
-                )}
-              </h1>
-              <p>
-                {view === "overview"
-                  ? `Welcome back, ${user.name.split(" ")[0]}. Let’s make sense of your next meal.`
-                  : view === "diary"
-                    ? "A simple record of the meals you choose to save."
-                    : "Your goals, your preferences, your pace."}
-              </p>
-            </div>
-            <div className="heading-date">
-              <span className="date-icon">
-                <Clock3 size={18} />
-              </span>
+          {view !== "plus" && view !== "account" && (
+            <div className="page-heading">
               <div>
-                <small>ONE MEAL AT A TIME</small>
-                <strong>
-                  {new Date().toLocaleDateString(undefined, {
-                    month: "short",
-                    day: "numeric",
-                    year: "numeric",
-                  })}
-                </strong>
+                <div className="eyebrow">
+                  <span /> A LITTLE MORE MINDFUL, A LITTLE LESS GUESSWORK
+                </div>
+                <h1>
+                  {view === "overview" ? (
+                    <>
+                      Know what’s on
+                      <br className="mobile-break" /> your plate<span>.</span>
+                    </>
+                  ) : view === "diary" ? (
+                    "Your meals, at a glance."
+                  ) : (
+                    "A plan with you in mind."
+                  )}
+                </h1>
+                <p>
+                  {view === "overview"
+                    ? `Welcome back, ${user.name.split(" ")[0]}. Let’s make sense of your next meal.`
+                    : view === "diary"
+                      ? "A simple record of the meals you choose to save."
+                      : "Your goals, your preferences, your pace."}
+                </p>
+              </div>
+              <div className="heading-date">
+                <span className="date-icon">
+                  <Clock3 size={18} />
+                </span>
+                <div>
+                  <small>ONE MEAL AT A TIME</small>
+                  <strong>
+                    {new Date().toLocaleDateString(undefined, {
+                      month: "short",
+                      day: "numeric",
+                      year: "numeric",
+                    })}
+                  </strong>
+                </div>
               </div>
             </div>
-          </div>
+          )}
           {setupError && (
             <Feedback message={setupError} retry={() => void initialize()} />
           )}
-          {view === "plan" ? (
+          {view === "account" ? (
+            <AccountCenter user={user} onDeleted={onLogout} />
+          ) : view === "plus" ? (
+            <Membership user={user} />
+          ) : view === "plan" ? (
             <PlanView
               user={user}
               plan={plan}
@@ -801,6 +899,14 @@ export default function Tracker({
             />
           ) : (
             <>
+              {view === "overview" && (
+                <QuickLibrary
+                  revision={revision}
+                  disabled={locked}
+                  onRepeat={repeatMeal}
+                  onFood={shortcutFood}
+                />
+              )}
               <div className="dashboard-grid">
                 <div className="main-column">
                   {view === "overview" && (
@@ -1008,6 +1114,11 @@ export default function Tracker({
                           </button>
                         </p>
                       )}
+                      <PhotoAllowance
+                        revision={usageRevision}
+                        onPlus={() => navigate("plus")}
+                        visionAvailable={!!status?.visionAvailable}
+                      />
                     </section>
                   )}
                   {view === "overview" && analysis && (
@@ -1048,6 +1159,19 @@ export default function Tracker({
                         </span>
                       </div>
                       <div aria-live="polite">
+                        {analysis.uncertainty && (
+                          <details className="uncertainty-note">
+                            <summary>
+                              {analysis.uncertainty.level} uncertainty ·
+                              estimate assumptions
+                            </summary>
+                            <ul>
+                              {analysis.uncertainty.reasons.map((reason) => (
+                                <li key={reason}>{reason}</li>
+                              ))}
+                            </ul>
+                          </details>
+                        )}
                         <Nutrition values={analysis.totals} />
                       </div>
                       <div className="breakdown-heading">
@@ -1654,6 +1778,32 @@ export default function Tracker({
                             </p>
                           </div>
                           <div className="diary-meal-actions">
+                            <button
+                              className="icon-button"
+                              aria-label={`Repeat diary meal ${meal.title}`}
+                              disabled={locked}
+                              onClick={() => repeatMeal(meal)}
+                            >
+                              <RotateCcw size={16} />
+                            </button>
+                            <button
+                              className="icon-button"
+                              aria-label={`Star diary meal ${meal.title}`}
+                              disabled={locked}
+                              onClick={() =>
+                                void api(`/api/favourites/meals/${meal.id}`, {
+                                  method: "PUT",
+                                  body: JSON.stringify({ favourite: true }),
+                                })
+                                  .then(() => {
+                                    setRevision((v) => v + 1);
+                                    setToast("Meal saved to favourites.");
+                                  })
+                                  .catch((e) => setDiaryError(errorMessage(e)))
+                              }
+                            >
+                              <Star size={16} />
+                            </button>
                             <button
                               className="icon-button"
                               aria-label={`Edit ${meal.title}`}

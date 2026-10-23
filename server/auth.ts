@@ -28,17 +28,27 @@ export class Accounts {
     db.exec(
       `CREATE TABLE IF NOT EXISTS users(id TEXT PRIMARY KEY,name TEXT NOT NULL,email TEXT NOT NULL UNIQUE,password_hash TEXT NOT NULL,profile TEXT);CREATE TABLE IF NOT EXISTS sessions(token_hash TEXT PRIMARY KEY,user_id TEXT NOT NULL,expires_at INTEGER NOT NULL);CREATE INDEX IF NOT EXISTS session_expiry ON sessions(expires_at);`,
     );
+    const columns = db.prepare("PRAGMA table_info(users)").all() as {
+      name: string;
+    }[];
+    if (!columns.some((c) => c.name === "email_verified_at"))
+      db.exec("ALTER TABLE users ADD COLUMN email_verified_at TEXT");
+    if (!columns.some((c) => c.name === "deleting_at"))
+      db.exec("ALTER TABLE users ADD COLUMN deleting_at TEXT");
   }
   account(row: any): Account {
     return {
       id: row.id,
       name: row.name,
       email: row.email,
+      emailVerified: !!row.email_verified_at,
       profile: row.profile ? JSON.parse(row.profile) : null,
     };
   }
   get(id: string): Account | undefined {
-    const row = this.db.prepare("SELECT * FROM users WHERE id=?").get(id);
+    const row = this.db
+      .prepare("SELECT * FROM users WHERE id=? AND deleting_at IS NULL")
+      .get(id);
     return row ? this.account(row) : undefined;
   }
   async signup(body: unknown): Promise<Account> {
@@ -75,7 +85,7 @@ export class Accounts {
     ];
     const actual = (await scrypt(password, salt, 64)) as Buffer;
     const valid = timingSafeEqual(actual, Buffer.from(expected, "hex"));
-    if (!row || !valid)
+    if (!row || !valid || row.deleting_at)
       throw new AppError(401, "BAD_LOGIN", "Email or password is incorrect.");
     return this.account(row);
   }
@@ -119,14 +129,12 @@ export class Accounts {
   require = (req: Request, res: Response, next: NextFunction) => {
     const user = this.current(req);
     if (!user)
-      return res
-        .status(401)
-        .json({
-          error: {
-            code: "AUTH_REQUIRED",
-            message: "Sign in to open your personal diary.",
-          },
-        });
+      return res.status(401).json({
+        error: {
+          code: "AUTH_REQUIRED",
+          message: "Sign in to open your personal diary.",
+        },
+      });
     res.locals.user = user;
     next();
   };

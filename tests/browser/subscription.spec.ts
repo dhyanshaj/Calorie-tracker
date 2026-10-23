@@ -89,7 +89,7 @@ test("monthly subscription checkout and cancellation disclose renewal terms and 
     .getByRole("button", { name: "My nutrition plan", exact: true })
     .click();
   await expect(page.locator(".subscription-card")).toContainText(
-    "billing renews monthly unless you cancel renewal",
+    "billing renews at your chosen interval unless you cancel renewal",
   );
   await expect(page.locator(".subscription-dates").first()).toContainText(
     "Paid access through",
@@ -156,7 +156,7 @@ test("monthly subscription checkout and cancellation disclose renewal terms and 
       json: {
         id: "sub_uiNew",
         keyId: "rzp_test_uiFixture",
-        amount: 49900,
+        amount: 19900,
         currency: "INR",
         name: "Platewise",
         description: "UI fixture subscription",
@@ -199,9 +199,9 @@ test("monthly subscription checkout and cancellation disclose renewal terms and 
       on() {}
     };
   });
-  await page.getByRole("button", { name: "Subscribe for ₹499/month" }).click();
+  await page.getByRole("button", { name: "Subscribe for ₹199/month" }).click();
   await expect(page.locator(".payment-notice")).toContainText(
-    "₹499/month plan is active",
+    "Plus plan is active",
   );
   const options = await page.evaluate(() => (window as any).checkoutFixture);
   expect(options.subscription_id).toBe("sub_uiNew");

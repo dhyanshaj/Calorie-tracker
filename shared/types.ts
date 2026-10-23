@@ -1,6 +1,7 @@
 export type Nutrients = { kcal: number; protein: number; fat: number };
 export type Portion = { unit: string; grams: number; label: string };
 export type Food = {
+  ingredients?: { key: string; name: string; gramsPer100: number }[];
   id: string;
   name: string;
   category: string;
@@ -23,6 +24,7 @@ export type MealItem = ItemInput & {
   nutrients: Nutrients;
 };
 export type Analysis = {
+  uncertainty?: { level: "higher" | "moderate" | "lower"; reasons: string[] };
   items: MealItem[];
   totals: Nutrients;
   assumptions: string[];

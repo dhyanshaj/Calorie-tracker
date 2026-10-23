@@ -1,3 +1,4 @@
+import { MealSwap, WeeklyShopping } from "./PlanTools";
 import { useState } from "react";
 import {
   ArrowRight,
@@ -39,6 +40,8 @@ export function PlanView({
   onAddMeal: (items: PlannedMeal["items"], title: string) => void;
 }) {
   const [selectedDay, setSelectedDay] = useState(0);
+  const [monthExpanded, setMonthExpanded] = useState(false);
+  const week = Math.floor(selectedDay / 7);
   const progress = usePlanProgram();
   plan = plan?.eligible ? (progress.state?.program?.plan ?? plan) : plan;
   if (!plan)
@@ -167,6 +170,24 @@ export function PlanView({
               ? " Start your free plan above to save ticks."
               : ""}
           </p>
+          <div className="week-navigation" role="group" aria-label="Plan week">
+            {[0, 1, 2, 3, 4].map((w) => (
+              <button
+                key={w}
+                aria-pressed={week === w}
+                onClick={() => setSelectedDay(w * 7)}
+              >
+                Week {w + 1}
+              </button>
+            ))}
+            <button
+              className="text-button"
+              aria-expanded={monthExpanded}
+              onClick={() => setMonthExpanded((v) => !v)}
+            >
+              {monthExpanded ? "Show one week" : "Show all 30 days"}
+            </button>
+          </div>
           <div className="month-days" role="tablist" aria-label="Meal plan day">
             {plan.days.map((day, index) => {
               const completed =
@@ -179,6 +200,7 @@ export function PlanView({
                 <div
                   className={`month-day ${index === selectedDay ? "selected" : ""} ${completed ? "completed" : ""}`}
                   key={day.day}
+                  hidden={!monthExpanded && Math.floor(index / 7) !== week}
                 >
                   <button
                     id={`plan-tab-${index}`}
@@ -196,13 +218,13 @@ export function PlanView({
                       if (next !== undefined) {
                         event.preventDefault();
                         setSelectedDay(next);
-                        (
-                          event.currentTarget
-                            .closest(".month-days")
-                            ?.querySelectorAll("[role=tab]")[
-                            next
-                          ] as HTMLButtonElement
-                        )?.focus();
+                        window.setTimeout(
+                          () =>
+                            document
+                              .getElementById(`plan-tab-${next}`)
+                              ?.focus(),
+                          0,
+                        );
                       }
                     }}
                   >
@@ -240,9 +262,8 @@ export function PlanView({
           </div>
           {progress.state?.access.status === "expired" && (
             <p className="plan-expired-note">
-              Your past plan is read-only. A ₹499/month subscription enables
-              continued checklists and new plans while your paid access is
-              active.
+              Your past plan is read-only. A Plus subscription enables continued
+              checklists and new plans while your paid access is active.
             </p>
           )}
           <div
@@ -321,6 +342,18 @@ export function PlanView({
                         ))}
                       </ol>
                     </details>
+                    <MealSwap
+                      program={progress.state?.program}
+                      day={selectedDay + 1}
+                      slot={index}
+                      disabled={
+                        !progress.state?.access.canTrack ||
+                        !!progress.state?.program?.completedDays.includes(
+                          selectedDay + 1,
+                        )
+                      }
+                      onState={progress.setState}
+                    />
                     <button
                       className="text-button"
                       disabled={!canLogMeals}
@@ -380,6 +413,7 @@ export function PlanView({
                 review it and confirm saving.
               </p>
             </div>
+            <WeeklyShopping plan={plan} week={week} />
             <details className="card shopping-list">
               <summary>
                 <ShoppingBasket size={18} />

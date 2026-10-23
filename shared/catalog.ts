@@ -49,6 +49,9 @@ function food(
     assumption,
     category,
     source: source([ndb]),
+    ingredients: [
+      { key: `ndb:${ndb}`, name: usda[ndb].description, gramsPer100: 100 },
+    ],
   };
 }
 export const catalog: Food[] = [
@@ -298,5 +301,437 @@ for (const [baseId, parts] of [
       true,
     ),
   });
+}
+
+// Additional USDA ingredients; each uses a real SR28 record in the pinned archive.
+const additions: [string, string, string, string[], number][] = [
+  [
+    "kidney-beans",
+    "16028",
+    "Cooked kidney beans",
+    ["rajma beans", "kidney beans"],
+    177,
+  ],
+  ["brown-rice", "20037", "Cooked brown rice", ["brown rice"], 195],
+  ["quinoa", "20137", "Cooked quinoa", ["quinoa"], 185],
+  ["millet", "20032", "Cooked millet", ["millet"], 174],
+  ["cauliflower", "11136", "Cooked cauliflower", ["cauliflower", "gobi"], 124],
+  ["carrot", "11125", "Cooked carrot", ["carrot", "carrots", "gajar"], 156],
+  ["peas", "11305", "Cooked green peas", ["green peas", "matar", "peas"], 160],
+  ["cucumber", "11205", "Raw cucumber", ["cucumber", "kheera"], 104],
+  ["cabbage", "11109", "Raw cabbage", ["cabbage"], 89],
+  ["orange", "09200", "Orange", ["orange", "oranges"], 131],
+  [
+    "greek-yogurt",
+    "01256",
+    "Plain nonfat Greek yogurt",
+    ["greek yogurt", "greek yoghurt"],
+    170,
+  ],
+  ["mung", "16081", "Cooked mung beans", ["mung beans", "moong beans"], 202],
+  [
+    "peanuts",
+    "16390",
+    "Unsalted roasted peanuts",
+    ["roasted peanuts", "peanuts"],
+    28,
+  ],
+  ["cashews", "12087", "Raw cashews", ["cashew", "cashews", "kaju"], 28],
+];
+for (const [id, ndb, name, aliases, grams] of additions)
+  catalog.push(
+    food(
+      id,
+      ndb,
+      name,
+      aliases,
+      [p("serving", grams)],
+      `Reference portion ≈ ${grams} g edible. No added oil, sugar, or sauce. Weigh and adjust for your serving.`,
+    ),
+  );
+export type RecipeMetadata = {
+  allergens: string[];
+  diet: "vegan" | "vegetarian" | "balanced";
+  minutes: number;
+  budget: "everyday" | "flexible";
+  cuisine: "indian" | "mediterranean" | "international";
+};
+export const recipeMetadata: Record<string, RecipeMetadata> = {};
+function addRecipe(
+  id: string,
+  name: string,
+  aliases: string[],
+  parts: [string, number][],
+  grams: number,
+  meta: Partial<RecipeMetadata> = {},
+) {
+  const ingredientText = parts
+    .map(([ndb, g]) => `${g} g ${usda[ndb].description.toLowerCase()}`)
+    .join(", ");
+  const used = parts.reduce((n, [, g]) => n + g, 0);
+  if (used > 100.001) throw new Error(`Recipe ${id} exceeds 100 g`);
+  catalog.push({
+    id,
+    name,
+    aliases,
+    category:
+      meta.cuisine === "mediterranean"
+        ? "Mediterranean kitchen"
+        : "Indian kitchen",
+    per100: recipe(parts),
+    portions: [p("serving", grams), g],
+    source: source(
+      parts.map(([ndb]) => ndb),
+      true,
+    ),
+    assumption: `Calculated recipe per 100 g finished edible food: ${ingredientText}${used < 100 ? `, plus ${Number((100 - used).toFixed(1))} g water` : ""}. Portion ≈ ${grams} g. Oil is already included. Restaurant recipes and cooking yields vary; this is a reference recipe, not a measured serving.`,
+  });
+  catalog.at(-1)!.ingredients = parts.map(([ndb, g]) => ({
+    key: `ndb:${ndb}`,
+    name: usda[ndb].description,
+    gramsPer100: g,
+  }));
+  recipeMetadata[id] = {
+    allergens: [],
+    diet: "vegan",
+    minutes: 30,
+    budget: "everyday",
+    cuisine: "indian",
+    ...meta,
+  };
+  if (parts.some(([ndb]) => ndb === "04053")) {
+    catalog.push({
+      ...catalog.at(-1)!,
+      id: `${id}-no-oil`,
+      name: `${name} · no added oil`,
+      aliases: [],
+      per100: recipe(parts.filter(([ndb]) => ndb !== "04053")),
+      assumption:
+        catalog.at(-1)!.assumption +
+        " This variant replaces its oil with water. Add any declared oil separately.",
+    });
+    recipeMetadata[`${id}-no-oil`] = recipeMetadata[id];
+    catalog.at(-1)!.ingredients = parts
+      .filter(([ndb]) => ndb !== "04053")
+      .map(([ndb, g]) => ({
+        key: `ndb:${ndb}`,
+        name: usda[ndb].description,
+        gramsPer100: g,
+      }));
+  }
+}
+addRecipe(
+  "chole",
+  "Chole · chickpea curry",
+  ["chole", "chana masala"],
+  [
+    ["16057", 78],
+    ["11529", 12],
+    ["11283", 7],
+    ["04053", 3],
+  ],
+  200,
+);
+addRecipe(
+  "rajma",
+  "Rajma · kidney bean curry",
+  ["rajma", "rajma curry"],
+  [
+    ["16028", 78],
+    ["11529", 12],
+    ["11283", 7],
+    ["04053", 3],
+  ],
+  200,
+);
+addRecipe(
+  "khichdi",
+  "Moong dal khichdi",
+  ["khichdi", "khichri"],
+  [
+    ["20045", 45],
+    ["16081", 35],
+    ["11125", 10],
+    ["11305", 7],
+    ["04053", 3],
+  ],
+  250,
+);
+addRecipe(
+  "veg-pulao",
+  "Vegetable pulao",
+  ["pulao", "veg pulao", "vegetable pulao"],
+  [
+    ["20045", 75],
+    ["11305", 10],
+    ["11125", 7],
+    ["11283", 5],
+    ["04053", 3],
+  ],
+  200,
+);
+addRecipe(
+  "egg-bhurji",
+  "Egg bhurji",
+  ["egg bhurji", "anda bhurji"],
+  [
+    ["01129", 65],
+    ["11529", 20],
+    ["11283", 10],
+    ["04053", 5],
+  ],
+  120,
+  { diet: "vegetarian", allergens: ["Eggs"], minutes: 15 },
+);
+addRecipe(
+  "besan-chilla",
+  "Besan chilla",
+  ["besan chilla", "chilla", "cheela"],
+  [
+    ["16157", 35],
+    ["11529", 15],
+    ["11282", 10],
+    ["04053", 3],
+  ],
+  100,
+  { minutes: 15 },
+);
+addRecipe(
+  "moong-chilla",
+  "Moong dal chilla",
+  ["moong chilla", "moong dal chilla"],
+  [
+    ["16080", 35],
+    ["11529", 10],
+    ["11282", 10],
+    ["04053", 3],
+  ],
+  100,
+);
+addRecipe(
+  "upma",
+  "Vegetable upma",
+  ["upma", "vegetable upma"],
+  [
+    ["20466", 25],
+    ["11305", 15],
+    ["11125", 10],
+    ["11282", 7],
+    ["04053", 3],
+  ],
+  200,
+  { allergens: ["Wheat / gluten"], minutes: 15 },
+);
+addRecipe(
+  "mung-chaat",
+  "Cooked moong chaat",
+  ["moong chaat", "mung chaat"],
+  [
+    ["16081", 70],
+    ["11529", 15],
+    ["11205", 15],
+  ],
+  180,
+  { minutes: 15 },
+);
+addRecipe(
+  "raita",
+  "Cucumber raita",
+  ["raita", "cucumber raita"],
+  [
+    ["01116", 70],
+    ["11205", 25],
+    ["11529", 5],
+  ],
+  150,
+  { diet: "vegetarian", allergens: ["Milk"], minutes: 15 },
+);
+addRecipe(
+  "palak-tofu",
+  "Palak tofu",
+  ["palak tofu", "tofu palak"],
+  [
+    ["16426", 60],
+    ["11458", 30],
+    ["11529", 7],
+    ["04053", 3],
+  ],
+  180,
+  { allergens: ["Soy"] },
+);
+addRecipe(
+  "aloo-gobi",
+  "Aloo gobi",
+  ["aloo gobi"],
+  [
+    ["11674", 50],
+    ["11136", 40],
+    ["11529", 7],
+    ["04053", 3],
+  ],
+  180,
+);
+addRecipe(
+  "mixed-sabzi",
+  "Mixed vegetable sabzi",
+  ["mixed sabzi", "vegetable sabzi", "mixed vegetable sabzi"],
+  [
+    ["11136", 35],
+    ["11125", 25],
+    ["11305", 25],
+    ["11529", 12],
+    ["04053", 3],
+  ],
+  180,
+  { minutes: 15 },
+);
+addRecipe(
+  "sambar",
+  "Vegetable sambar",
+  ["sambar", "sambhar"],
+  [
+    ["16070", 50],
+    ["11125", 10],
+    ["11283", 5],
+    ["11529", 10],
+    ["04053", 2],
+  ],
+  200,
+);
+addRecipe(
+  "paratha",
+  "Plain whole-wheat paratha",
+  ["plain paratha", "paratha"],
+  [
+    ["20080", 45],
+    ["04053", 7],
+  ],
+  80,
+  { allergens: ["Wheat / gluten"] },
+);
+addRecipe(
+  "aloo-paratha",
+  "Aloo paratha",
+  ["aloo paratha"],
+  [
+    ["20080", 30],
+    ["11674", 35],
+    ["04053", 5],
+  ],
+  100,
+  { allergens: ["Wheat / gluten"] },
+);
+addRecipe(
+  "curd-rice",
+  "Curd rice",
+  ["curd rice", "dahi rice"],
+  [
+    ["20045", 65],
+    ["01116", 30],
+    ["11205", 5],
+  ],
+  220,
+  { diet: "vegetarian", allergens: ["Milk"], minutes: 15 },
+);
+addRecipe(
+  "tandoori-chicken",
+  "Yogurt-marinated chicken",
+  ["tandoori chicken", "chicken tikka"],
+  [
+    ["05064", 85],
+    ["01116", 10],
+    ["04053", 3],
+    ["11529", 2],
+  ],
+  150,
+  { diet: "balanced", allergens: ["Milk"], minutes: 45 },
+);
+addRecipe(
+  "fruit-chaat",
+  "Fresh fruit chaat",
+  ["fruit chaat", "fruit salad"],
+  [
+    ["09003", 40],
+    ["09040", 30],
+    ["09200", 30],
+  ],
+  180,
+  { minutes: 15 },
+);
+addRecipe(
+  "hummus",
+  "Chickpea dip · no tahini",
+  ["hummus", "chickpea dip"],
+  [
+    ["16057", 75],
+    ["04053", 8],
+  ],
+  80,
+  { cuisine: "mediterranean", minutes: 15 },
+);
+addRecipe(
+  "quinoa-bowl",
+  "Quinoa & chickpea bowl",
+  ["quinoa bowl"],
+  [
+    ["20137", 60],
+    ["16057", 25],
+    ["11205", 10],
+    ["04053", 5],
+  ],
+  250,
+  { cuisine: "mediterranean", budget: "flexible", minutes: 15 },
+);
+addRecipe(
+  "oat-yogurt-bowl",
+  "Oat, yogurt & banana bowl",
+  ["oat yogurt bowl"],
+  [
+    ["08121", 60],
+    ["01256", 25],
+    ["09040", 15],
+  ],
+  240,
+  {
+    diet: "vegetarian",
+    allergens: ["Milk"],
+    cuisine: "international",
+    minutes: 15,
+  },
+);
+for (const [id, parts] of [
+  ["roti", [["20080", (100 * 30) / 45]]],
+  [
+    "chicken-curry",
+    [
+      ["05098", 60],
+      ["11529", 25],
+      ["11283", 10],
+      ["04053", 5],
+    ],
+  ],
+  [
+    "dal",
+    [
+      ["16070", 90],
+      ["11529", 7],
+      ["04053", 3],
+    ],
+  ],
+] as [string, [string, number][]][]) {
+  catalog.find((f) => f.id === id)!.ingredients = parts.map(([ndb, g]) => ({
+    key: `ndb:${ndb}`,
+    name: usda[ndb].description,
+    gramsPer100: g,
+  }));
+  const variant = catalog.find((f) => f.id === `${id}-no-oil`);
+  if (variant)
+    variant.ingredients = parts
+      .filter(([ndb]) => ndb !== "04053")
+      .map(([ndb, g]) => ({
+        key: `ndb:${ndb}`,
+        name: usda[ndb].description,
+        gramsPer100: g,
+      }));
 }
 export const foodById = new Map(catalog.map((f) => [f.id, f]));

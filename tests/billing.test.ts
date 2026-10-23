@@ -52,7 +52,7 @@ function providerFixture() {
     id: "plan_fixture",
     period: "monthly",
     interval: 1,
-    item: { amount: 49900, currency: "INR" },
+    item: { amount: 19900, currency: "INR" },
   };
   const sub = {
     id: "sub_fixture",
@@ -77,12 +77,13 @@ function providerFixture() {
       creates++;
       assert.deepEqual(body, {
         plan_id: "plan_fixture",
-        total_count: 1200,
+        total_count: body.total_count,
         quantity: 1,
         customer_notify: true,
         expire_by: body.expire_by,
       });
       assert.equal(typeof body.expire_by, "number");
+      assert.ok([100, 1200].includes(body.total_count));
       if (creates > 1) sub.id = `sub_fixture${creates}`;
       sub.status = "created";
       return Response.json(sub);
@@ -111,7 +112,7 @@ function providerFixture() {
     const payment = {
       id: `pay_${name}`,
       order_id: `order_${name}`,
-      amount: 49900,
+      amount: 19900,
       currency: "INR",
       status: "captured",
       captured: true,
@@ -124,8 +125,8 @@ function providerFixture() {
       order_id: payment.order_id,
       payment_id: payment.id,
       status: "paid",
-      amount: 49900,
-      amount_paid: 49900,
+      amount: 19900,
+      amount_paid: 19900,
       currency: "INR",
       billing_start: seconds(start),
       billing_end: seconds(end),
@@ -206,7 +207,7 @@ test("subscription checkout requires configuration, a completed free period, and
   for (const change of [{ amount: 99900 }, { currency: "USD" }]) {
     Object.assign(
       provider.plan.item,
-      { amount: 49900, currency: "INR" },
+      { amount: 19900, currency: "INR" },
       change,
     );
     await assert.rejects(
@@ -214,7 +215,7 @@ test("subscription checkout requires configuration, a completed free period, and
       (e: any) => e.code === "WRONG_SUBSCRIPTION_PLAN",
     );
   }
-  Object.assign(provider.plan.item, { amount: 49900, currency: "INR" });
+  Object.assign(provider.plan.item, { amount: 19900, currency: "INR" });
   provider.plan.period = "yearly";
   await assert.rejects(
     () => billing.createSubscription("owner"),
@@ -239,7 +240,7 @@ test("checkout reuses subscriptions and a signature or active mandate alone neve
     billing.createSubscription("owner"),
   ]);
   assert.equal(checkout.id, concurrent.id);
-  assert.equal(checkout.amount, 49900);
+  assert.equal(checkout.amount, 19900);
   assert.equal(checkout.currency, "INR");
   assert.equal(provider.creates(), 1);
   assert.equal("keySecret" in checkout, false);
@@ -269,7 +270,7 @@ test("checkout reuses subscriptions and a signature or active mandate alone neve
   payment.amount = 1;
   await billing.status("owner");
   assert.equal(programs.access("owner").hasPaidPlan, false);
-  payment.amount = 49900;
+  payment.amount = 19900;
   invoice.subscription_id = "sub_other";
   await billing.status("owner");
   assert.equal(programs.access("owner").hasPaidPlan, false);
@@ -277,7 +278,7 @@ test("checkout reuses subscriptions and a signature or active mandate alone neve
   invoice.amount_paid = 40000;
   await billing.status("owner");
   assert.equal(programs.access("owner").hasPaidPlan, false);
-  invoice.amount_paid = 49900;
+  invoice.amount_paid = 19900;
   payment.order_id = "order_other";
   await billing.status("owner");
   assert.equal(programs.access("owner").hasPaidPlan, false);
@@ -406,7 +407,7 @@ test("full refunds revoke only their paid month and delayed webhook replays cann
   payment.amount_refunded = 10000;
   await billing.webhook(refund, sign(refund));
   assert.equal(programs.access("owner").hasPaidPlan, true);
-  payment.amount_refunded = 49900;
+  payment.amount_refunded = 19900;
   payment.status = "refunded";
   await billing.webhook(refund, sign(refund));
   await billing.webhook(refund, sign(refund));
@@ -566,11 +567,9 @@ test("HTTP subscription checkout, raw signed webhooks and cancellation enforce a
       headers: { "Content-Type": "application/json", Cookie: cookie },
       body: JSON.stringify({ ...profile, needsClinicalGuidance: true }),
     });
-    assert.equal(
-      (await request("/api/billing/subscriptions", {})).data.error.code,
-      "PLAN_UNAVAILABLE",
-    );
-    assert.equal(provider.creates(), 0);
+    assert.equal((await request("/api/auth/me")).data.plan.eligible, false);
+    assert.equal((await request("/api/billing/subscriptions", {})).status, 200);
+    assert.equal(provider.creates(), 1); // Plus photos remain usable while clinical planning is paused.
     await fetch(base + "/api/profile", {
       method: "PUT",
       headers: { "Content-Type": "application/json", Cookie: cookie },
@@ -578,7 +577,7 @@ test("HTTP subscription checkout, raw signed webhooks and cancellation enforce a
     });
     const checkout = await request("/api/billing/subscriptions", {});
     assert.equal(checkout.status, 200);
-    assert.equal(checkout.data.amount, 49900);
+    assert.equal(checkout.data.amount, 19900);
     provider.charge();
     const raw = chargedEvent();
     const invalid = await fetch(base + "/api/billing/webhook", {
@@ -633,5 +632,78 @@ test("HTTP subscription checkout, raw signed webhooks and cancellation enforce a
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
     store.close();
+  }
+});
+
+test("annual checkout verifies the yearly price and grants one finite paid year with cancellation and refund handling", async () => {
+  const ctx = setup();
+  ctx.setNow(firstStart);
+  const provider = ctx.provider;
+  const billing = new Billing(
+    ctx.store.db,
+    ctx.programs,
+    { ...config, annualPlanId: config.planId },
+    provider.fetcher,
+    ctx.clock,
+  );
+  provider.plan.period = "yearly";
+  provider.plan.item.amount = 149900;
+  try {
+    const checkout = await billing.createSubscription("owner", "annual");
+    assert.equal(checkout.amount, 149900);
+    assert.equal(
+      provider.calls.find((c) => c.path === "subscriptions")!.body.total_count,
+      100,
+    );
+    const charge = provider.charge(
+      "annual",
+      firstStart,
+      "2027-11-20T10:00:00Z",
+    );
+    charge.invoice.amount = 149900;
+    charge.invoice.amount_paid = 149900;
+    charge.payment.amount = 149900;
+    await billing.verify("owner", callback("sub_fixture", "pay_annual"));
+    assert.equal(
+      ctx.programs.access("owner").paidUntil,
+      "2027-11-20T10:00:00.000Z",
+    );
+    assert.equal(ctx.programs.access("owner").subscription!.cadence, "annual");
+    await billing.cancel("owner", "sub_fixture");
+    assert.equal(ctx.programs.access("owner").hasPaidPlan, true);
+    charge.payment.amount_refunded = 149900;
+    charge.payment.status = "refunded";
+    const refund = Buffer.from(
+      JSON.stringify({
+        event: "refund.processed",
+        payload: { refund: { entity: { payment_id: "pay_annual" } } },
+      }),
+    );
+    await billing.webhook(refund, sign(refund));
+    assert.equal(ctx.programs.access("owner").hasPaidPlan, false);
+  } finally {
+    ctx.store.close();
+  }
+});
+
+test("existing ₹499 monthly subscriptions reconcile against their original verified price during upgrade", async () => {
+  const ctx = setup();
+  ctx.setNow(firstStart);
+  try {
+    ctx.store.db
+      .prepare(
+        "INSERT INTO plan_subscriptions(id,user_id,plan_id,status,created_at) VALUES(?,?,?,?,?)",
+      )
+      .run("sub_fixture", "owner", "plan_fixture", "active", firstStart);
+    ctx.provider.plan.item.amount = 49900;
+    const charge = ctx.provider.charge();
+    charge.invoice.amount = 49900;
+    charge.invoice.amount_paid = 49900;
+    charge.payment.amount = 49900;
+    await ctx.billing.status("owner");
+    assert.equal(ctx.programs.access("owner").hasPaidPlan, true);
+    assert.equal(ctx.programs.access("owner").subscription!.amountPaise, 49900);
+  } finally {
+    ctx.store.close();
   }
 });

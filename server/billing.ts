@@ -3,6 +3,8 @@ import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import {
   MONTHLY_PRICE_PAISE,
+  ANNUAL_PRICE_PAISE,
+  type BillingCadence,
   type CheckoutSubscription,
 } from "../shared/program";
 import { AppError } from "./errors";
@@ -13,15 +15,16 @@ export type PaymentConfig = {
   keySecret?: string;
   webhookSecret?: string;
   planId?: string;
+  annualPlanId?: string;
 };
 const subscriptionId = z.string().regex(/^sub_[A-Za-z0-9]+$/);
 const paymentId = z.string().regex(/^pay_[A-Za-z0-9]+$/);
 const planSchema = z.object({
   id: z.string(),
-  period: z.literal("monthly"),
+  period: z.enum(["monthly", "yearly"]),
   interval: z.literal(1),
   item: z.object({
-    amount: z.literal(MONTHLY_PRICE_PAISE),
+    amount: z.number().int().positive(),
     currency: z.literal("INR"),
   }),
 });
@@ -48,8 +51,8 @@ const invoiceSchema = z.object({
   order_id: z.string(),
   payment_id: paymentId,
   status: z.literal("paid"),
-  amount: z.literal(MONTHLY_PRICE_PAISE),
-  amount_paid: z.literal(MONTHLY_PRICE_PAISE),
+  amount: z.number().int().positive(),
+  amount_paid: z.number().int().positive(),
   currency: z.literal("INR"),
   billing_start: z.number().int().positive(),
   billing_end: z.number().int().positive(),
@@ -74,6 +77,8 @@ type SubscriptionRow = {
   plan_id: string;
   status: string;
   cancel_at_period_end: number;
+  amount: number;
+  cadence: BillingCadence;
 };
 const terminal = new Set(["cancelled", "completed", "expired"]);
 function signatureMatches(
@@ -103,7 +108,8 @@ export class Billing {
         this.config.keyId?.match(/^rzp_(test|live)_[A-Za-z0-9]+$/) &&
         this.config.keySecret &&
         this.config.webhookSecret &&
-        this.config.planId?.match(/^plan_[A-Za-z0-9]+$/)
+        (this.config.planId?.match(/^plan_[A-Za-z0-9]+$/) ||
+          this.config.annualPlanId?.match(/^plan_[A-Za-z0-9]+$/))
       ) &&
       !(
         process.env.NODE_ENV === "production" &&
@@ -111,15 +117,23 @@ export class Billing {
       )
     );
   }
+  available(cadence: BillingCadence) {
+    return (
+      this.configured &&
+      !!(
+        cadence === "annual" ? this.config.annualPlanId : this.config.planId
+      )?.match(/^plan_[A-Za-z0-9]+$/)
+    );
+  }
   get mode() {
     return this.config.keyId?.startsWith("rzp_test_") ? "test" : "live";
   }
-  private requireConfiguration() {
-    if (!this.configured)
+  private requireConfiguration(cadence?: BillingCadence) {
+    if (!this.configured || (cadence && !this.available(cadence)))
       throw new AppError(
         503,
         "PAYMENTS_NOT_CONFIGURED",
-        "Subscriptions are not enabled yet. The owner must configure Razorpay and the ₹499 monthly plan before accepting payments.",
+        "Subscriptions are not enabled yet. The owner must configure Razorpay and the Plus billing plans before accepting payments.",
       );
   }
   // All requests concerning one account run in order, including webhook recovery.
@@ -180,15 +194,24 @@ export class Billing {
       );
     return row;
   }
-  private async validatePlan(id: string) {
+  private async validatePlan(
+    id: string,
+    amount: number,
+    cadence: BillingCadence,
+  ) {
     const plan = planSchema.safeParse(
       await this.provider(`plans/${encodeURIComponent(id)}`),
     );
-    if (!plan.success || plan.data.id !== id)
+    if (
+      !plan.success ||
+      plan.data.id !== id ||
+      plan.data.item.amount !== amount ||
+      plan.data.period !== (cadence === "annual" ? "yearly" : "monthly")
+    )
       throw new AppError(
         409,
         "WRONG_SUBSCRIPTION_PLAN",
-        "The merchant plan must be ₹499 INR every month, with a billing interval of one. Ask the owner to correct the payment setup.",
+        "The merchant plan must match the selected INR price and monthly or annual billing interval of one. Ask the owner to correct the payment setup.",
       );
   }
   private async fetchSubscription(row: SubscriptionRow) {
@@ -210,7 +233,7 @@ export class Billing {
   }
   private async sync(row: SubscriptionRow) {
     const subscription = await this.fetchSubscription(row);
-    await this.validatePlan(row.plan_id);
+    await this.validatePlan(row.plan_id, row.amount, row.cadence);
     const proofs: {
       id: string;
       invoice: string;
@@ -239,8 +262,11 @@ export class Billing {
         const invoice = parsed.data;
         if (
           invoice.subscription_id !== row.id ||
+          invoice.amount !== row.amount ||
+          invoice.amount_paid !== row.amount ||
           invoice.billing_end <= invoice.billing_start ||
-          invoice.billing_end - invoice.billing_start > 32 * 86400
+          invoice.billing_end - invoice.billing_start >
+            (row.cadence === "annual" ? 367 : 32) * 86400
         )
           continue;
         const saved = this.db
@@ -274,7 +300,7 @@ export class Billing {
         if (
           payment.id !== invoice.payment_id ||
           payment.order_id !== invoice.order_id ||
-          payment.amount !== MONTHLY_PRICE_PAISE ||
+          payment.amount !== row.amount ||
           payment.currency !== "INR" ||
           !payment.captured ||
           !["captured", "refunded"].includes(payment.status)
@@ -285,7 +311,7 @@ export class Billing {
           invoice: invoice.id,
           start: invoice.billing_start,
           end: invoice.billing_end,
-          refunded: payment.amount_refunded >= MONTHLY_PRICE_PAISE,
+          refunded: payment.amount_refunded >= row.amount,
         });
       }
       if (page.items.length < 100) break;
@@ -312,9 +338,16 @@ export class Billing {
       throw error;
     }
   }
-  createSubscription(userId: string): Promise<CheckoutSubscription> {
+  createSubscription(
+    userId: string,
+    cadence: BillingCadence = "monthly",
+  ): Promise<CheckoutSubscription> {
     return this.serial(userId, async () => {
-      this.requireConfiguration();
+      this.requireConfiguration(cadence);
+      const requestedPlan =
+        cadence === "annual" ? this.config.annualPlanId! : this.config.planId!;
+      const amount =
+        cadence === "annual" ? ANNUAL_PRICE_PAISE : MONTHLY_PRICE_PAISE;
       const access = this.programs.access(userId);
       if (access.hasPaidPlan)
         throw new AppError(
@@ -343,21 +376,28 @@ export class Billing {
             "An existing subscription needs attention. Check status or cancel it before creating another.",
           );
       }
+      if (
+        row &&
+        !terminal.has(row.status) &&
+        (row.cadence !== cadence || row.amount !== amount)
+      )
+        throw new AppError(
+          409,
+          "PENDING_PLAN_CHANGE",
+          "Cancel the unfinished subscription before choosing a different billing option.",
+        );
       if (!row || terminal.has(row.status)) {
-        await this.validatePlan(this.config.planId!);
+        await this.validatePlan(requestedPlan, amount, cadence);
         const created = subscriptionSchema.parse(
           await this.provider("subscriptions", {
-            plan_id: this.config.planId,
-            total_count: 1200, // Razorpay's documented maximum duration is 100 years.
+            plan_id: requestedPlan,
+            total_count: cadence === "annual" ? 100 : 1200, // Razorpay's documented maximum duration is 100 years.
             quantity: 1,
             customer_notify: true,
             expire_by: Math.floor(this.clock().getTime() / 1000) + 7 * 86400,
           }),
         );
-        if (
-          created.plan_id !== this.config.planId ||
-          created.status !== "created"
-        )
+        if (created.plan_id !== requestedPlan || created.status !== "created")
           throw new AppError(
             409,
             "SUBSCRIPTION_MISMATCH",
@@ -365,7 +405,7 @@ export class Billing {
           );
         this.db
           .prepare(
-            "INSERT INTO plan_subscriptions(id,user_id,plan_id,status,created_at) VALUES(?,?,?,?,?)",
+            "INSERT INTO plan_subscriptions(id,user_id,plan_id,status,created_at,amount,cadence) VALUES(?,?,?,?,?,?,?)",
           )
           .run(
             created.id,
@@ -373,17 +413,18 @@ export class Billing {
             created.plan_id,
             created.status,
             this.clock().toISOString(),
+            amount,
+            cadence,
           );
         row = this.owned(created.id, userId);
       }
       return {
         id: row.id,
-        amount: MONTHLY_PRICE_PAISE,
+        amount: row.amount,
         currency: "INR",
         keyId: this.config.keyId!,
         name: "Platewise",
-        description:
-          "₹499/month meal planning · renews monthly · cancel renewal anytime",
+        description: `Plus · ₹${row.amount / 100}/${row.cadence === "annual" ? "year" : "month"} · cancel renewal anytime`,
       };
     });
   }
@@ -455,6 +496,15 @@ export class Billing {
       // Never remove a verified paid period just because renewal was cancelled.
     });
   }
+  async cancelAll(userId: string) {
+    await this.tasks.get(userId)?.catch(() => {});
+    const rows = this.db
+      .prepare(
+        "SELECT id FROM plan_subscriptions WHERE user_id=? AND status NOT IN ('cancelled','completed','expired') AND cancel_at_period_end=0",
+      )
+      .all(userId) as { id: string }[];
+    for (const row of rows) await this.cancel(userId, row.id);
+  }
   async webhook(raw: Buffer, signature: string) {
     if (!this.config.webhookSecret)
       throw new AppError(
@@ -493,9 +543,9 @@ export class Billing {
         throw new AppError(400, "INVALID_WEBHOOK", "Missing refund payment.");
       const paid = this.db
         .prepare(
-          "SELECT s.user_id FROM subscription_payments p JOIN plan_subscriptions s ON s.id=p.subscription_id WHERE p.id=?",
+          "SELECT s.user_id,s.amount FROM subscription_payments p JOIN plan_subscriptions s ON s.id=p.subscription_id WHERE p.id=?",
         )
-        .get(id) as { user_id: string } | undefined;
+        .get(id) as { user_id: string; amount: number } | undefined;
       const legacy = this.db
         .prepare("SELECT user_id FROM memberships WHERE lifetime_payment_id=?")
         .get(id) as { user_id: string } | undefined;
@@ -504,7 +554,7 @@ export class Billing {
         const payment = paymentSchema.parse(
           await this.provider(`payments/${encodeURIComponent(id)}`),
         );
-        const expected = paid ? MONTHLY_PRICE_PAISE : 99900; // Honor refund revocations for fulfilled legacy purchases.
+        const expected = paid ? paid.amount : 99900; // Honor refund revocations for fulfilled legacy purchases.
         if (
           payment.id !== id ||
           payment.currency !== "INR" ||

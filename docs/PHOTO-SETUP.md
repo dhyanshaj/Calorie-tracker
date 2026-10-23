@@ -80,3 +80,16 @@ Photos are decoded in memory, resized, and stripped of metadata. They are not
 saved in the app’s database. OpenAI processes the image and description under
 its [API data policy](https://platform.openai.com/docs/guides/your-data).
 `store: false` is requested; it does not guarantee zero provider retention.
+
+## Start the photo allowance
+
+Open **Plus membership** to explicitly start the 30-calendar-day trial when you
+are ready. It includes 100 successful photo analyses. Paid monthly and annual
+Plus each reset 100 analyses monthly. Basic description/manual tracking stays
+free. In production, first verify your email in **Account & privacy**. The owner
+must configure the email service using [LAUNCH.md](LAUNCH.md).
+
+A server-side key is not evidence of real-food accuracy. After a successful
+real meal request, follow [PHOTO-VALIDATION.md](PHOTO-VALIDATION.md) for weighed-meal
+benchmarks. The app's uncertainty labels are qualitative; photos cannot reveal
+exact cooking oil, recipe ingredients, edible meat yields or weights.

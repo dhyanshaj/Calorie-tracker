@@ -89,8 +89,8 @@ day snapshots retain their own targets when pending days change with the profile
 An expired account cannot generate a fresh plan through the profile endpoint.
 
 `POST /api/billing/subscriptions` creates or reuses an account-owned Razorpay
-subscription only after trial expiry. It validates the provider plan: monthly,
-interval 1, quantity 1, INR 49900 paise. `POST /api/billing/verify` checks the
+subscription only after trial expiry. It validates the provider plan: monthly/yearly,
+interval 1, quantity 1, INR 19900 paise monthly or 149900 paise yearly. `POST /api/billing/verify` checks the
 subscription-specific HMAC (`payment_id|subscription_id`) using the stored owned
 ID. A valid signature/mandate alone grants nothing. Reconciliation fetches the
 provider subscription and paginated invoices, then verifies each relevant paid
@@ -114,3 +114,40 @@ remain intact. Old one-time order checkout is retired. Production rejects test
 keys for checkout and webhook fulfillment. See [PAYMENTS.md](PAYMENTS.md) and
 [PHOTO-SETUP.md](PHOTO-SETUP.md). Tests use explicit fixtures; no live recurring
 charge, mandate, settlement, cancellation or refund has been verified.
+
+## Account lifecycle, shortcuts and usage
+
+Resend email is optional in development and required for production Plus account
+verification. Email/reset requests are rate limited. Action tokens are random,
+hashed at rest, purpose-bound, expiring and consumed transactionally. A password
+reset revokes existing sessions. Link tokens use URL fragments and are cleared
+by the client; they are never included in access-log URL queries.
+
+Account exports omit password/session/token secrets. Deletion reauthenticates,
+marks the account as deleting so new operations stop, drains existing per-user
+billing tasks, cancels renewals, and removes personal app tables transactionally.
+Billing references receive an unlinked random deleted-account identifier.
+An email/provider failure is surfaced rather than simulated as success.
+
+Favourites store account-owned food/meal snapshots. Repeating creates an editable
+draft with a fresh save token. The server validates any source snapshot against
+that same account; confirmation retains ordinary idempotency/version rules.
+
+Photo usage is reserved transactionally before live image analysis, capped at
+100 successful nonempty results per trial/month. Failures release reservations.
+Annual periods use calendar-month anchors with month-end clamping. Description
+requests at the HTTP boundary use the local parser, without unmetered AI calls.
+No image or image hash is retained in the usage ledger.
+
+Menus now include regional recipe pools, pantry-budget and active-time filters,
+plus allergen/diet checks. Swaps optimize the chosen meal while keeping the other
+three fixed. Server ownership, active access, completed-day checks and a revision
+number prevent stale or forbidden changes. Profile signatures retain saved swaps
+until preferences/targets change. Weekly lists aggregate snapshotted ingredient
+weights and disclose cooked/raw reference differences.
+
+The runtime exposes a minimal database health check, restrictive production
+headers and redacted request logs. Online SQLite backups and isolated restore
+checks are executable scripts with regression coverage. Deployment examples
+use a non-root Node image, persistent volumes and a single trusted Caddy proxy.
+See [LAUNCH.md](LAUNCH.md) for remaining operational and provider validation.

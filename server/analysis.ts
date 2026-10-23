@@ -108,6 +108,40 @@ export async function analyzeMeal(
     );
   assumptions.push(...items.map((i) => i.food.assumption));
   return {
+    uncertainty: {
+      level:
+        incomplete || !items.length
+          ? "higher"
+          : image
+            ? "higher"
+            : parsed.explicit.size === items.length &&
+                items.every(
+                  (i) =>
+                    i.unit === "g" && !i.food.source.label.includes("Recipe"),
+                )
+              ? "lower"
+              : "moderate",
+      reasons: [
+        ...(image
+          ? [
+              "Photo portions and hidden cooking fats cannot be measured exactly.",
+            ]
+          : []),
+        ...(parsed.explicit.size < items.length
+          ? ["Some amounts use assumed household servings."]
+          : []),
+        ...(items.some((i) => i.food.source.label.includes("Recipe"))
+          ? [
+              "Mixed dishes use documented reference recipes; oil and cooking yields vary.",
+            ]
+          : []),
+        ...(parsed.explicit.size
+          ? [
+              "Your explicit quantities override visual guesses; measured edible grams improve the estimate.",
+            ]
+          : []),
+      ],
+    },
     items,
     totals: sumNutrients(items),
     method: image ? "vision" : "description",

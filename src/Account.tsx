@@ -21,6 +21,7 @@ import {
   X,
 } from "lucide-react";
 import type { Account, DailyPlan, Profile } from "../shared/profile";
+import { AccountActionPage } from "./AccountCenter";
 import { activities, allergies, barriers, goals } from "../shared/profile";
 import { api } from "./api";
 import Tracker from "./App";
@@ -65,6 +66,15 @@ export function Root() {
       setError(e instanceof Error ? e.message : "Could not sign out.");
     }
   }
+  const accountAction = window.location.pathname.match(
+    /^\/account\/(reset|verify|request)\/?$/,
+  )?.[1];
+  if (accountAction)
+    return (
+      <AccountActionPage
+        purpose={accountAction as "reset" | "verify" | "request"}
+      />
+    );
   if (loading)
     return (
       <div className="startup-screen">
@@ -89,10 +99,12 @@ export function Root() {
         onSuccess={(user, plan) => {
           setAccount(user);
           setPlan(plan);
+          setSettings(!user.profile);
+          setStartInPlan(false);
         }}
       />
     );
-  if (!account.profile || settings)
+  if (settings)
     return (
       <ProfileWizard
         account={account}
@@ -102,7 +114,7 @@ export function Root() {
           setSettings(false);
           setStartInPlan(true);
         }}
-        onCancel={account.profile ? () => setSettings(false) : undefined}
+        onCancel={() => setSettings(false)}
         onLogout={() => void logout()}
       />
     );
@@ -331,10 +343,15 @@ function Auth({
             <LockKeyhole size={13} />
             Passwords are securely hashed. Your diary is linked to your account.
           </p>
+          {!signup && (
+            <a className="text-button forgot-link" href="/account/request">
+              Forgot your password?
+            </a>
+          )}
           <div className="auth-small-note">
             Use Gmail or any email address. This is an app account, not Google
-            sign-in. Email verification and password recovery are not enabled in
-            this version.
+            sign-in. Use an email address you can access for verification and
+            recovery.
           </div>
         </div>
         <div className="auth-bottom-note">
@@ -431,7 +448,7 @@ export function ProfileWizard({
           {onCancel ? (
             <button className="button button-quiet" onClick={onCancel}>
               <X size={17} />
-              Back to dashboard
+              {account.profile ? "Back to dashboard" : "Start tracking first"}
             </button>
           ) : (
             <button className="button button-quiet" onClick={onLogout}>
@@ -824,6 +841,68 @@ export function ProfileWizard({
                     </select>
                   </label>
                 </div>
+                <div className="profile-form-grid meal-preferences-form">
+                  <label>
+                    Preferred cuisine
+                    <select
+                      value={
+                        form.cuisine ??
+                        (/india/i.test(form.country)
+                          ? "indian"
+                          : "international")
+                      }
+                      onChange={(e) =>
+                        update("cuisine", e.target.value as Profile["cuisine"])
+                      }
+                    >
+                      <option value="indian">Indian home cooking</option>
+                      <option value="mediterranean">
+                        Mediterranean inspired
+                      </option>
+                      <option value="international">
+                        A little of everything
+                      </option>
+                    </select>
+                  </label>
+                  <label>
+                    Food budget
+                    <select
+                      value={form.budget ?? "everyday"}
+                      onChange={(e) =>
+                        update("budget", e.target.value as Profile["budget"])
+                      }
+                    >
+                      <option value="everyday">
+                        Everyday pantry ingredients
+                      </option>
+                      <option value="flexible">
+                        Flexible · include specialty ingredients
+                      </option>
+                    </select>
+                  </label>
+                  <label>
+                    Active preparation time
+                    <select
+                      value={form.cookingMinutes ?? 30}
+                      onChange={(e) =>
+                        update(
+                          "cookingMinutes",
+                          Number(e.target.value) as Profile["cookingMinutes"],
+                        )
+                      }
+                    >
+                      <option value="15">Up to 15 minutes</option>
+                      <option value="30">Up to 30 minutes</option>
+                      <option value="45">Up to 45 minutes</option>
+                    </select>
+                  </label>
+                </div>
+                <p className="preference-hint">
+                  Quick meals assume pre-cooked grains and beans. Soaking, batch
+                  cooking and passive cooking take extra time. Budget
+                  preferences favour familiar pantry ingredients; local prices
+                  vary.
+                </p>
                 <div className="allergy-heading">
                   Exclude these allergens <span>Optional</span>
                 </div>
@@ -878,6 +957,15 @@ export function ProfileWizard({
               </div>
             )}
             <div className="onboarding-actions">
+              {step === 1 && (
+                <button
+                  type="button"
+                  className="text-button"
+                  onClick={() => setStep(2)}
+                >
+                  Skip this optional step
+                </button>
+              )}
               {step > 0 ? (
                 <button
                   className="button button-quiet"

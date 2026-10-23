@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { DailyPlan, Profile } from "../shared/profile";
 import { activities } from "../shared/profile";
 import { buildMonthMenu } from "./menu";
@@ -28,13 +29,27 @@ const tips: Record<string, string> = {
   "Food preferences or restrictions":
     "Review ingredient labels and choose food swaps that suit you. A photo cannot reliably detect allergens.",
 };
-export function buildPlan(profile: Profile, now = new Date()): DailyPlan {
+export function buildPlan(
+  profile: Profile,
+  now = new Date(),
+  seed = 0,
+): DailyPlan {
   const age = ageAt(profile.birthDate, now),
     warnings: string[] = [];
   const barrierTips = profile.barriers
     .filter((b) => tips[b])
     .map((barrier) => ({ barrier, tip: tips[barrier] }));
   const base: DailyPlan = {
+    sourceProfile: createHash("sha256")
+      .update(
+        JSON.stringify({
+          profile,
+          seed,
+          age,
+          engineVersion: "2026-10-regional-1",
+        }),
+      )
+      .digest("hex"),
     eligible: false,
     targets: null,
     maintenanceKcal: null,
@@ -148,7 +163,7 @@ export function buildPlan(profile: Profile, now = new Date()): DailyPlan {
       "Source methods: Mifflin et al. (1990), general adult macronutrient ranges. Sample menu nutrition uses the same documented USDA food references as the tracker.",
     ],
   };
-  plan.days = buildMonthMenu(profile, targets);
+  plan.days = buildMonthMenu(profile, targets, seed);
   plan.week = plan.days.slice(0, 7);
   plan.menu = plan.week[0].menu;
   plan.menuTotals = sumNutrients(

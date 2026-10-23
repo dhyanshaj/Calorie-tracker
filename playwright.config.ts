@@ -41,6 +41,10 @@ export default defineConfig({
       RAZORPAY_KEY_SECRET: "",
       RAZORPAY_WEBHOOK_SECRET: "",
       RAZORPAY_PLAN_ID: "",
+      RAZORPAY_ANNUAL_PLAN_ID: "",
+      MAIL_API_KEY: "",
+      MAIL_FROM: "",
+      APP_PUBLIC_URL: "",
     },
   },
 });
